@@ -1,7 +1,7 @@
 import json
 
-from src.agent.prompts import build_sufficiency_prompt
-from src.agent.schemas import SufficiencyResult
+from src.alchemyx.agent.prompts import build_sufficiency_prompt
+from src.alchemyx.agent.schemas import SufficiencyResult
 
 
 class SufficiencyChecker:
