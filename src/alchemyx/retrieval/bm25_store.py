@@ -1,3 +1,5 @@
+import re
+
 from rank_bm25 import BM25Okapi
 
 try:
@@ -13,11 +15,11 @@ class BM25Store:
         self.bm25 = None
 
     def add_documents(self, documents):
-        self.documents = documents
-        self.tokenized_documents = [
-            document["text"].lower().split()
+        self.documents.extend(documents)
+        self.tokenized_documents.extend(
+            self._tokenize(document["text"])
             for document in documents
-        ]
+        )
 
         self.bm25 = BM25Okapi(self.tokenized_documents)
 
@@ -25,7 +27,7 @@ class BM25Store:
         if self.bm25 is None:
             return []
 
-        tokenized_query = query.lower().split()
+        tokenized_query = self._tokenize(query)
         scores = self.bm25.get_scores(tokenized_query)
 
         ranked_results = sorted(
@@ -44,3 +46,7 @@ class BM25Store:
         )
 
         return ranked_results[:top_k]
+
+    @staticmethod
+    def _tokenize(text):
+        return re.findall(r"\w+", text.lower())
