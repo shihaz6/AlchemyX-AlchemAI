@@ -1,6 +1,13 @@
 import chromadb
-from embeddings import VoyageEmbeddingFunction
-from chunking import chunk_text
+
+try:
+    from .Retrieval_Result import RetrievalResult
+    from .embeddings import VoyageEmbeddingFunction
+    from .chunking import chunk_text
+except ImportError:
+    from Retrieval_Result import RetrievalResult
+    from embeddings import VoyageEmbeddingFunction
+    from chunking import chunk_text
 
 
 class RetrievalPipeline:
@@ -34,11 +41,89 @@ class RetrievalPipeline:
         )
         print(f"Added {len(chunks)} chunks from '{doc_id}'")
 
-    def query(self, question, n_results=3):
+    def query(self, question, n_results=3) -> list[RetrievalResult]:
 
         query_embeddings = self.query_ef([question])
         results = self.collection.query(
             query_embeddings=query_embeddings,
             n_results=n_results
         )
-        return results
+        return self._to_retrieval_results(results)
+
+    def search_many(self, queries, n_results=5) -> list[RetrievalResult]:
+        queries = list(queries)
+        if not queries:
+            return []
+
+        query_embeddings = self.query_ef(queries)
+        raw_results = self.collection.query(
+            query_embeddings=query_embeddings,
+            n_results=n_results
+        )
+
+        merged_results = []
+        seen_ids = set()
+
+        for result in self._to_retrieval_results(raw_results):
+            if result.id in seen_ids:
+                continue
+
+            seen_ids.add(result.id)
+            merged_results.append(result)
+
+        return merged_results
+
+    @staticmethod
+    def _to_retrieval_results(raw_results) -> list[RetrievalResult]:
+        retrieval_results = []
+
+        ids_by_query = raw_results.get("ids") or []
+        documents_by_query = raw_results.get("documents") or []
+        metadatas_by_query = raw_results.get("metadatas") or []
+        distances_by_query = raw_results.get("distances") or []
+
+        for query_index, ids in enumerate(ids_by_query):
+            documents = (
+                documents_by_query[query_index]
+                if query_index < len(documents_by_query)
+                else []
+            )
+            metadatas = (
+                metadatas_by_query[query_index]
+                if query_index < len(metadatas_by_query)
+                else []
+            )
+            distances = (
+                distances_by_query[query_index]
+                if query_index < len(distances_by_query)
+                else []
+            )
+
+            for result_index, result_id in enumerate(ids):
+                metadata = (
+                    metadatas[result_index]
+                    if result_index < len(metadatas) and metadatas[result_index]
+                    else {}
+                )
+                distance = (
+                    distances[result_index]
+                    if result_index < len(distances)
+                    else 0.0
+                )
+                score = 1.0 - distance if distance is not None else 0.0
+
+                retrieval_results.append(
+                    RetrievalResult(
+                        id=result_id,
+                        text=(
+                            documents[result_index]
+                            if result_index < len(documents)
+                            else ""
+                        ),
+                        source_doc=metadata.get("source_doc", ""),
+                        chunk_index=metadata.get("chunk_index", 0),
+                        score=score,
+                    )
+                )
+
+        return retrieval_results
