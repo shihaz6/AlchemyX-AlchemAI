@@ -1,5 +1,4 @@
 import chromadb
-
 try:
     from .Retrieval_Result import RetrievalResult
     from .embeddings import VoyageEmbeddingFunction
@@ -8,8 +7,6 @@ except ImportError:
     from Retrieval_Result import RetrievalResult
     from embeddings import VoyageEmbeddingFunction
     from chunking import chunk_text
-
-
 class RetrievalPipeline:
     def __init__(self, api_key, collection_name="alchemyx_docs"):
         # Setting up the voyage embedding function, used for documents being stored
@@ -61,17 +58,20 @@ class RetrievalPipeline:
             n_results=n_results
         )
 
-        merged_results = []
-        seen_ids = set()
+        results_by_id = {}
 
         for result in self._to_retrieval_results(raw_results):
-            if result.id in seen_ids:
+            existing_result = results_by_id.get(result.id)
+            if existing_result is not None and existing_result.score >= result.score:
                 continue
 
-            seen_ids.add(result.id)
-            merged_results.append(result)
+            results_by_id[result.id] = result
 
-        return merged_results
+        return sorted(
+            results_by_id.values(),
+            key=lambda result: result.score,
+            reverse=True,
+        )
 
     @staticmethod
     def _to_retrieval_results(raw_results) -> list[RetrievalResult]:
@@ -125,5 +125,4 @@ class RetrievalPipeline:
                         score=score,
                     )
                 )
-
         return retrieval_results
