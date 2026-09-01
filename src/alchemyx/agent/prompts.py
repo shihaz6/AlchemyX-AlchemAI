@@ -4,9 +4,9 @@ def build_sufficiency_prompt(question, documents):
 
     for doc in documents:
         evidence_text += f"""
-[EVIDENCE ID: {doc['id']}]
+[EVIDENCE ID: {doc.id}]
 
-{doc['text']}
+{doc.text}
 
 """
 

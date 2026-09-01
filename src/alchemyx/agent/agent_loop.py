@@ -28,7 +28,7 @@ class AgentLoop:
             # 2. Add only new documents
             for document in retrieved:
 
-                document_id = document["id"]
+                document_id = document.id
 
                 if document_id not in seen_document_ids:
 

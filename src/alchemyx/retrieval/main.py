@@ -1,20 +1,20 @@
 import os
 from dotenv import find_dotenv, load_dotenv
-from bm25_store import BM25Store
-from chunking import chunk_text
-from hybrid_search import HybridSearch
-from reranker import Reranker
-from retrieval import RetrievalPipeline
+try:
+    from .bm25_store import BM25Store
+    from .chunking import chunk_text
+    from .hybrid_search import HybridSearch
+    from .reranker import Reranker
+    from .retrieval import RetrievalPipeline
+    from ..agent.hybrid_rerank_retrieval import HybridRerankRetrievalPipeline
+except ImportError:
+    from bm25_store import BM25Store
+    from chunking import chunk_text
+    from hybrid_search import HybridSearch
+    from reranker import Reranker
+    from retrieval import RetrievalPipeline
+    from src.alchemyx.agent.hybrid_rerank_retrieval import HybridRerankRetrievalPipeline
 
-load_dotenv(find_dotenv())
-API_KEY = os.getenv("VOYAGE_API_KEY")
-if not API_KEY:
-    raise RuntimeError("VOYAGE_API_KEY is missing. Add it to the .env file.")
-
-pipeline = RetrievalPipeline(api_key=API_KEY)
-bm25_store = BM25Store()
-hybrid_search = HybridSearch(pipeline, bm25_store)
-reranker = Reranker(api_key=API_KEY)
 MIN_RERANK_SCORE = 0.5
 
 caldrin_doc = """
@@ -32,7 +32,37 @@ Ilyra Senn later claimed she had asked Mira to remove it before Thornwatch's cou
 could hand it to the Iron Prior.
 """
 
-def add_document_to_indexes(doc_id, text, chunk_size=30, overlap=5):
+def get_api_key(api_key=None):
+    load_dotenv(find_dotenv())
+    api_key = api_key or os.getenv("VOYAGE_API_KEY")
+    if not api_key:
+        raise RuntimeError("VOYAGE_API_KEY is missing. Add it to the .env file.")
+
+    return api_key
+
+
+def create_retrieval_stack(api_key=None):
+    api_key = get_api_key(api_key)
+    pipeline = RetrievalPipeline(api_key=api_key)
+    bm25_store = BM25Store()
+    hybrid_search = HybridSearch(pipeline, bm25_store)
+    reranker = Reranker(api_key=api_key)
+
+    return pipeline, bm25_store, hybrid_search, reranker
+
+
+def create_agent_retrieval_pipeline(api_key=None):
+    _pipeline, _bm25_store, hybrid_search, reranker = create_retrieval_stack(api_key)
+    return HybridRerankRetrievalPipeline(
+        hybrid_search=hybrid_search,
+        reranker=reranker,
+        candidate_k=15,
+        top_k=5,
+        min_relevance_score=MIN_RERANK_SCORE,
+    )
+
+
+def add_document_to_indexes(pipeline, bm25_store, doc_id, text, chunk_size=30, overlap=5):
     pipeline.add_document(
         doc_id=doc_id,
         text=text,
@@ -54,8 +84,19 @@ def add_document_to_indexes(doc_id, text, chunk_size=30, overlap=5):
     )
 
 
-add_document_to_indexes(doc_id="caldrin_wiki", text=caldrin_doc)
-add_document_to_indexes(doc_id="mira_wiki", text=mira_doc)
+def add_demo_documents(pipeline, bm25_store):
+    add_document_to_indexes(
+        pipeline=pipeline,
+        bm25_store=bm25_store,
+        doc_id="caldrin_wiki",
+        text=caldrin_doc,
+    )
+    add_document_to_indexes(
+        pipeline=pipeline,
+        bm25_store=bm25_store,
+        doc_id="mira_wiki",
+        text=mira_doc,
+    )
 
 
 def print_results(results):
@@ -75,54 +116,62 @@ def find_rank(results, expected_id):
     return None
 
 
-test_queries = [
-    "Who did Caldrin escort?",
-    "Why did Mira take the reliquary?",
-    "What happened during the Night of Falling Bells?",
-    "Who asked Mira to remove the reliquary?",
-    "What is the time now?",
-]
+def run_demo():
+    pipeline, bm25_store, hybrid_search, reranker = create_retrieval_stack()
+    add_demo_documents(pipeline, bm25_store)
 
-expected_chunks = {
-    "Who did Caldrin escort?": "caldrin_wiki_chunk2",
-    "Why did Mira take the reliquary?": "mira_wiki_chunk1",
-    "What happened during the Night of Falling Bells?": "caldrin_wiki_chunk2",
-    "Who asked Mira to remove the reliquary?": "mira_wiki_chunk1",
-}
+    test_queries = [
+        "Who did Caldrin escort?",
+        "Why did Mira take the reliquary?",
+        "What happened during the Night of Falling Bells?",
+        "Who asked Mira to remove the reliquary?",
+        "What is the time now?",
+    ]
 
-for query in test_queries:
-    print(f"\n--- Query: {query} ---")
+    expected_chunks = {
+        "Who did Caldrin escort?": "caldrin_wiki_chunk2",
+        "Why did Mira take the reliquary?": "mira_wiki_chunk1",
+        "What happened during the Night of Falling Bells?": "caldrin_wiki_chunk2",
+        "Who asked Mira to remove the reliquary?": "mira_wiki_chunk1",
+    }
 
-    semantic_results = pipeline.query(query)
-    bm25_results = bm25_store.search(query)
-    hybrid_results = hybrid_search.search(query)
-    candidates = hybrid_search.search(query, top_k=15)
-    final_results = reranker.rerank(
-        query,
-        candidates,
-        top_k=5,
-        min_relevance_score=MIN_RERANK_SCORE,
-    )
+    for query in test_queries:
+        print(f"\n--- Query: {query} ---")
 
-    print("\nSemantic:")
-    print_results(semantic_results)
+        semantic_results = pipeline.query(query)
+        bm25_results = bm25_store.search(query)
+        hybrid_results = hybrid_search.search(query)
+        candidates = hybrid_search.search(query, top_k=15)
+        final_results = reranker.rerank(
+            query,
+            candidates,
+            top_k=5,
+            min_relevance_score=MIN_RERANK_SCORE,
+        )
 
-    print("\nBM25:")
-    print_results(bm25_results)
+        print("\nSemantic:")
+        print_results(semantic_results)
 
-    print("\nHybrid RRF:")
-    print_results(hybrid_results)
+        print("\nBM25:")
+        print_results(bm25_results)
 
-    print("\nHybrid RRF + Reranker:")
-    print(f"min_relevance_score={MIN_RERANK_SCORE}")
-    print_results(final_results)
+        print("\nHybrid RRF:")
+        print_results(hybrid_results)
 
-    expected_id = expected_chunks.get(query)
-    if expected_id:
-        print("\nExpected chunk ranks:")
-        print(f"Semantic: {expected_id} -> rank {find_rank(semantic_results, expected_id)}")
-        print(f"BM25:     {expected_id} -> rank {find_rank(bm25_results, expected_id)}")
-        print(f"Hybrid:   {expected_id} -> rank {find_rank(hybrid_results, expected_id)}")
-        print(f"Reranked: {expected_id} -> rank {find_rank(final_results, expected_id)}")
-    else:
-        print("\nNo expected chunk; checking whether retrieval returns irrelevant matches.")
+        print("\nHybrid RRF + Reranker:")
+        print(f"min_relevance_score={MIN_RERANK_SCORE}")
+        print_results(final_results)
+
+        expected_id = expected_chunks.get(query)
+        if expected_id:
+            print("\nExpected chunk ranks:")
+            print(f"Semantic: {expected_id} -> rank {find_rank(semantic_results, expected_id)}")
+            print(f"BM25:     {expected_id} -> rank {find_rank(bm25_results, expected_id)}")
+            print(f"Hybrid:   {expected_id} -> rank {find_rank(hybrid_results, expected_id)}")
+            print(f"Reranked: {expected_id} -> rank {find_rank(final_results, expected_id)}")
+        else:
+            print("\nNo expected chunk; checking whether retrieval returns irrelevant matches.")
+
+
+if __name__ == "__main__":
+    run_demo()
