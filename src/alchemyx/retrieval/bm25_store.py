@@ -16,12 +16,27 @@ class BM25Store:
 
     def add_documents(self, documents):
         self.documents.extend(documents)
-        self.tokenized_documents.extend(
-            self._tokenize(document["text"])
-            for document in documents
-        )
+        self._rebuild()
 
-        self.bm25 = BM25Okapi(self.tokenized_documents)
+    def replace_documents(self, source_doc, documents):
+        self.documents = [
+            document
+            for document in self.documents
+            if document.get("source_doc") != source_doc
+        ]
+        self.documents.extend(documents)
+        self._rebuild()
+
+    def _rebuild(self):
+        self.tokenized_documents = [
+            self._tokenize(document["text"])
+            for document in self.documents
+        ]
+        self.bm25 = (
+            BM25Okapi(self.tokenized_documents)
+            if self.tokenized_documents
+            else None
+        )
 
     def search(self, query, top_k=5):
         if self.bm25 is None:

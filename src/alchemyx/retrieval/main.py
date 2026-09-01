@@ -52,7 +52,24 @@ def create_retrieval_stack(api_key=None):
 
 
 def create_agent_retrieval_pipeline(api_key=None):
-    _pipeline, _bm25_store, hybrid_search, reranker = create_retrieval_stack(api_key)
+    load_dotenv(find_dotenv())
+    corpus_folder_path = os.getenv("ALCHEMYX_CORPUS_PATH")
+    if not corpus_folder_path:
+        raise RuntimeError(
+            "ALCHEMYX_CORPUS_PATH is missing. Set it to a corpus folder so "
+            "create_agent_retrieval_pipeline() can hydrate BM25 before serving "
+            "hybrid retrieval."
+        )
+
+    pipeline, bm25_store, hybrid_search, reranker = create_retrieval_stack(api_key)
+
+    try:
+        from alchemyx.ingestion.ingestion import ingest_corpus
+    except ImportError:
+        from src.alchemyx.ingestion.ingestion import ingest_corpus
+
+    ingest_corpus(corpus_folder_path, pipeline, bm25_store)
+
     return HybridRerankRetrievalPipeline(
         hybrid_search=hybrid_search,
         reranker=reranker,
@@ -71,17 +88,19 @@ def add_document_to_indexes(pipeline, bm25_store, doc_id, text, chunk_size=30, o
     )
 
     chunks = chunk_text(text, chunk_size=chunk_size, overlap=overlap)
-    bm25_store.add_documents(
-        [
-            {
-                "id": f"{doc_id}_chunk{index}",
-                "text": chunk,
-                "source_doc": doc_id,
-                "chunk_index": index,
-            }
-            for index, chunk in enumerate(chunks)
-        ]
-    )
+    bm25_documents = [
+        {
+            "id": f"{doc_id}_chunk{index}",
+            "text": chunk,
+            "source_doc": doc_id,
+            "chunk_index": index,
+        }
+        for index, chunk in enumerate(chunks)
+    ]
+    if hasattr(bm25_store, "replace_documents"):
+        bm25_store.replace_documents(doc_id, bm25_documents)
+    else:
+        bm25_store.add_documents(bm25_documents)
 
 
 def add_demo_documents(pipeline, bm25_store):

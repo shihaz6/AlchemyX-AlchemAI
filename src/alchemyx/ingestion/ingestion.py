@@ -1,9 +1,17 @@
 import os
+from dataclasses import dataclass, field
 
 
 SUPPORTED_EXTENSIONS = ('.txt', '.md', '.docx', '.pdf')
 TESSERACT_CMD_ENV = "TESSERACT_CMD"
 WINDOWS_TESSERACT_CMD = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+
+
+@dataclass
+class IngestionResult:
+    ingested: list[str] = field(default_factory=list)
+    skipped: list[str] = field(default_factory=list)
+    failed: dict[str, str] = field(default_factory=dict)
 
 
 def read_txt_md(file_path):
@@ -33,10 +41,10 @@ def read_pdf(file_path):
         pytesseract.pytesseract.tesseract_cmd = WINDOWS_TESSERACT_CMD
 
     text = ""
-    doc = fitz.open(file_path)
-    
-    for page in doc:
-        text += page.get_text()
+
+    with fitz.open(file_path) as doc:
+        for page in doc:
+            text += page.get_text()
         
     if len(text.strip()) < 50:
         print(f"[OCR] Scanned file detected...Processing: {file_path}")
@@ -73,12 +81,19 @@ def ingest_corpus(corpus_folder_path, pipeline, bm25_store):
     except ImportError:
         from src.alchemyx.retrieval.main import add_document_to_indexes
 
-    for root, dirs, files in os.walk(corpus_folder_path):
+    result = IngestionResult()
+
+    for root, _dirs, files in os.walk(corpus_folder_path):
         for file in files:
             file_path = os.path.join(root, file)
             extracted_text = ""
 
             try:
+                if not file.lower().endswith(SUPPORTED_EXTENSIONS):
+                    result.skipped.append(make_doc_id(corpus_folder_path, file_path))
+                    print(f"Skipped unsupported file: {file}")
+                    continue
+
                 extracted_text = extract_text(file_path)
 
                 if extracted_text:
@@ -89,10 +104,29 @@ def ingest_corpus(corpus_folder_path, pipeline, bm25_store):
                         doc_id=doc_id,
                         text=extracted_text,
                     )
+                    result.ingested.append(doc_id)
                     print(f"✅ Success: {file} ingested.")
+                else:
+                    result.skipped.append(make_doc_id(corpus_folder_path, file_path))
+                    print(f"Skipped empty file: {file}")
 
             except Exception as e:
+                result.failed[make_doc_id(corpus_folder_path, file_path)] = str(e)
                 print(f"❌ Error: {file} can't read file. Reason: {e}")
+
+    return result
+
+
+def print_ingestion_summary(result):
+    print("\nIngestion summary:")
+    print(f"Ingested: {len(result.ingested)}")
+    print(f"Skipped: {len(result.skipped)}")
+    print(f"Failed: {len(result.failed)}")
+
+    if result.failed:
+        print("\nFailed files:")
+        for doc_id, reason in result.failed.items():
+            print(f"- {doc_id}: {reason}")
 
 
 if __name__ == "__main__":
@@ -105,6 +139,7 @@ if __name__ == "__main__":
     pipeline, bm25_store, _hybrid_search, _reranker = create_retrieval_stack()
     
     print("Corpus startig reading...")
-    ingest_corpus(my_corpus_folder, pipeline, bm25_store)
+    result = ingest_corpus(my_corpus_folder, pipeline, bm25_store)
+    print_ingestion_summary(result)
     
-    print("\nDone! Corpus ingested.")
+    print("\nDone! Corpus ingestion completed.")

@@ -72,6 +72,7 @@ class AgentLoop:
 
             # 6. Select next query
             next_query = result.search_queries[0]
+            previous_queries.add(current_query)
 
             # 7. Prevent repeated queries
             if next_query in previous_queries:
@@ -86,8 +87,6 @@ class AgentLoop:
                     "iterations": iteration + 1,
                     "stop_reason": "repeated_query"
                 }
-
-            previous_queries.add(current_query)
 
             current_query = next_query
 
