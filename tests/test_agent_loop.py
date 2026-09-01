@@ -1,54 +1,117 @@
 from src.alchemyx.agent.agent_loop import AgentLoop
-from src.alchemyx.agent.openrouter_client import OpenRouterClient
-from src.alchemyx.agent.sufficiency_checker import SufficiencyChecker
+from src.alchemyx.agent.schemas import SufficiencyResult
 from tests.fake_retrieval import FakeRetrievalPipeline
 
 
-def main():
+class FakeSufficiencyChecker:
 
-    retrieval_pipeline = FakeRetrievalPipeline()
+    def check(self, question, documents):
+        if any(document.id == "doc_3" for document in documents):
+            return SufficiencyResult(
+                sufficient=True,
+                missing=[],
+                search_queries=[],
+                evidence_ids=["doc_3"],
+                reason="Found affected equipment.",
+            )
 
-    llm_client = OpenRouterClient()
-
-    checker = SufficiencyChecker(
-        llm_client
-    )
-
-    agent = AgentLoop(
-        retrieval_pipeline,
-        checker
-    )
-
-    question = (
-        "Which equipment is affected when Component Y fails?"
-    )
-
-    result = agent.run(question)
-
-    print("\n========== FINAL ==========\n")
-
-    print("Iterations:")
-    print(result["iterations"])
-
-    print("\nStop reason:")
-    print(result["stop_reason"])
-
-    print("\nFinal sufficiency:")
-    print(result["result"].sufficient)
-
-    print("\nMissing:")
-    print(result["result"].missing)
-
-    print("\nDocuments used:")
-
-    for document in result["documents"]:
-
-        print(
-            document["id"],
-            ":",
-            document["text"]
+        return SufficiencyResult(
+            sufficient=False,
+            missing=["affected equipment"],
+            search_queries=["equipment affected by Component Y failure"],
+            evidence_ids=["doc_1", "doc_2"],
+            reason="Need affected equipment evidence.",
         )
 
 
-if __name__ == "__main__":
-    main()
+class RepeatingSufficiencyChecker:
+
+    def check(self, question, documents):
+        return SufficiencyResult(
+            sufficient=False,
+            missing=["more evidence"],
+            search_queries=[question],
+            evidence_ids=[],
+            reason="Repeated query.",
+        )
+
+
+class NoSearchQuerySufficiencyChecker:
+
+    def check(self, question, documents):
+        return SufficiencyResult(
+            sufficient=False,
+            missing=["more evidence"],
+            search_queries=[],
+            evidence_ids=[],
+            reason="No actionable query.",
+        )
+
+
+class NeverSufficientChecker:
+
+    def __init__(self):
+        self.calls = 0
+
+    def check(self, question, documents):
+        self.calls += 1
+        return SufficiencyResult(
+            sufficient=False,
+            missing=["more evidence"],
+            search_queries=[f"followup {self.calls}"],
+            evidence_ids=[],
+            reason="Keep searching.",
+        )
+
+
+def test_agent_loop_accumulates_retrieval_results_until_sufficient():
+    agent = AgentLoop(
+        FakeRetrievalPipeline(),
+        FakeSufficiencyChecker(),
+    )
+
+    result = agent.run("Which equipment is affected when Component Y fails?")
+
+    assert result["stop_reason"] == "sufficient_evidence"
+    assert result["iterations"] == 2
+    assert [document.id for document in result["documents"]] == [
+        "doc_1",
+        "doc_2",
+        "doc_3",
+    ]
+
+
+def test_agent_loop_stops_before_repeating_same_query():
+    agent = AgentLoop(
+        FakeRetrievalPipeline(),
+        RepeatingSufficiencyChecker(),
+    )
+
+    result = agent.run("Which equipment is affected when Component Y fails?")
+
+    assert result["stop_reason"] == "repeated_query"
+    assert result["iterations"] == 1
+
+
+def test_agent_loop_stops_when_no_search_query_is_available():
+    agent = AgentLoop(
+        FakeRetrievalPipeline(),
+        NoSearchQuerySufficiencyChecker(),
+    )
+
+    result = agent.run("Which equipment is affected when Component Y fails?")
+
+    assert result["stop_reason"] == "no_search_query"
+    assert result["iterations"] == 1
+
+
+def test_agent_loop_stops_at_max_iterations():
+    agent = AgentLoop(
+        FakeRetrievalPipeline(),
+        NeverSufficientChecker(),
+    )
+
+    result = agent.run("Which equipment is affected when Component Y fails?")
+
+    assert result["stop_reason"] == "max_iterations"
+    assert result["iterations"] == AgentLoop.MAX_ITERATIONS

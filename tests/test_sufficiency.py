@@ -1,64 +1,46 @@
-from src.alchemyx.agent.openrouter_client import OpenRouterClient
+import json
+
 from src.alchemyx.agent.sufficiency_checker import SufficiencyChecker
+from src.alchemyx.retrieval.Retrieval_Result import RetrievalResult
 
 
-def main():
+class FakeLLMClient:
 
+    def ask(self, prompt):
+        assert "[EVIDENCE ID: doc_1]" in prompt
+        assert "Component Y controls the coolant flow" in prompt
+
+        return json.dumps(
+            {
+                "sufficient": False,
+                "missing": ["identity of the escort"],
+                "search_queries": ["Who did Caldrin escort?"],
+                "evidence_ids": [],
+                "reason": "Evidence does not identify the person.",
+            }
+        )
+
+
+def test_sufficiency_checker_accepts_retrieval_results():
     documents = [
-        {
-            "id": "doc_1",
-            "text": (
-                "Component Y controls the coolant flow "
-                "in Reactor Unit 4."
-            )
-        },
-        {
-            "id": "doc_2",
-            "text": (
-                "When Component Y fails, coolant flow "
-                "stops."
-            )
-        },
-        {
-            "id": "doc_3",
-            "text": (
-                "Loss of coolant flow affects Reactor Pump A."
-            )
-        }
+        RetrievalResult(
+            id="doc_1",
+            text="Component Y controls the coolant flow in Reactor Unit 4.",
+            source_doc="fake",
+            chunk_index=0,
+            score=1.0,
+        )
     ]
 
-    question = (
-        "Which equipment is affected when Component Y fails?"
-    )
-
-    llm_client = OpenRouterClient()
-
-    checker = SufficiencyChecker(
-        llm_client
-    )
+    checker = SufficiencyChecker(FakeLLMClient())
 
     result = checker.check(
-        question,
-        documents
+        "Which equipment is affected when Component Y fails?",
+        documents,
     )
 
-    print("\n========== RESULT ==========\n")
-
-    print("Sufficient:")
-    print(result.sufficient)
-
-    print("\nMissing:")
-    print(result.missing)
-
-    print("\nSearch queries:")
-    print(result.search_queries)
-
-    print("\nEvidence IDs:")
-    print(result.evidence_ids)
-
-    print("\nReason:")
-    print(result.reason)
-
-
-if __name__ == "__main__":
-    main()
+    assert result.sufficient is False
+    assert result.missing == ["identity of the escort"]
+    assert result.search_queries == ["Who did Caldrin escort?"]
+    assert result.evidence_ids == []
+    assert result.reason == "Evidence does not identify the person."
