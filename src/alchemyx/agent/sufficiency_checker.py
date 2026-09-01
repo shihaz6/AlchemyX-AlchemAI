@@ -7,7 +7,6 @@ from src.alchemyx.agent.schemas import SufficiencyResult
 class SufficiencyChecker:
 
     def __init__(self, llm_client):
-
         self.llm_client = llm_client
 
     def check(self, question, documents):
@@ -22,12 +21,6 @@ class SufficiencyChecker:
         return self._parse_response(response)
 
     def _parse_response(self, response):
-
-        cleaned = response.strip()
-        if cleaned.startswith(""):
-            cleaned = cleaned.split("")[1]
-            if cleaned.startswith("json"):
-                cleaned = cleaned[4:]
 
         try:
             data = json.loads(response)
@@ -53,31 +46,26 @@ class SufficiencyChecker:
                 )
 
         if not isinstance(data["sufficient"], bool):
-
             raise ValueError(
                 "'sufficient' must be true or false"
             )
 
         if not isinstance(data["missing"], list):
-
             raise ValueError(
                 "'missing' must be a list"
             )
 
         if not isinstance(data["search_queries"], list):
-
             raise ValueError(
                 "'search_queries' must be a list"
             )
 
         if not isinstance(data["evidence_ids"], list):
-
             raise ValueError(
                 "'evidence_ids' must be a list"
             )
 
         if not isinstance(data["reason"], str):
-
             raise ValueError(
                 "'reason' must be a string"
             )
