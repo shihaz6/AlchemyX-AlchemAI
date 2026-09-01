@@ -1,4 +1,4 @@
-from src.alchemyx.llm.openrouter_client import OpenRouterClient
+from alchemyx.agent.openrouter_client import OpenRouterClient
 from src.alchemyx.agent.sufficiency_checker import SufficiencyChecker
 
 
