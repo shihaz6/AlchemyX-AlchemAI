@@ -1,5 +1,10 @@
 import voyageai
 
+try:
+    from .Retrieval_Result import RetrievalResult
+except ImportError:
+    from Retrieval_Result import RetrievalResult
+
 
 class Reranker:
     def __init__(self, api_key, min_relevance_score=0.0):
@@ -28,10 +33,18 @@ class Reranker:
 
         for item in response.results:
             result = results[item.index]
-            result.score = item.relevance_score
-            if result.score < threshold:
+            score = item.relevance_score
+            if score < threshold:
                 continue
 
-            reranked.append(result)
+            reranked.append(
+                RetrievalResult(
+                    id=result.id,
+                    text=result.text,
+                    source_doc=result.source_doc,
+                    chunk_index=result.chunk_index,
+                    score=score,
+                )
+            )
 
         return reranked

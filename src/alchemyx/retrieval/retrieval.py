@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import chromadb
 try:
     from .Retrieval_Result import RetrievalResult
@@ -8,13 +10,19 @@ except ImportError:
     from embeddings import VoyageEmbeddingFunction
     from chunking import chunk_text
 class RetrievalPipeline:
-    def __init__(self, api_key, collection_name="alchemyx_docs"):
+    def __init__(
+        self,
+        api_key,
+        collection_name="alchemyx_docs",
+        persist_directory="data/chroma",
+    ):
         # Setting up the voyage embedding function, used for documents being stored
         self.document_ef = VoyageEmbeddingFunction(api_key=api_key, input_type="document")
         self.query_ef = VoyageEmbeddingFunction(api_key=api_key, input_type="query")
 
-        # Setting up chromadb client and collection, using voyage for embeddings
-        self.client = chromadb.Client()
+        # Setting up persistent chromadb client and collection, using voyage for embeddings
+        self.persist_directory = Path(persist_directory)
+        self.client = chromadb.PersistentClient(path=str(self.persist_directory))
         self.collection = self.client.get_or_create_collection(
             name=collection_name,
             embedding_function=self.document_ef,
@@ -30,6 +38,14 @@ class RetrievalPipeline:
 
         # Store which document each chunk came from — useful later for citing sources
         metadatas = [{"source_doc": doc_id, "chunk_index": i} for i in range(len(chunks))]
+
+        # Re-indexing a document replaces its old chunks instead of accumulating
+        # stale chunk ids/content across runs or repeated ingestion calls.
+        self.collection.delete(where={"source_doc": doc_id})
+
+        if not chunks:
+            print(f"Removed chunks for empty document '{doc_id}'")
+            return
 
         self.collection.add(
             documents=chunks,
