@@ -1,0 +1,130 @@
+try:
+    from .Retrieval_Result import RetrievalResult
+except ImportError:
+    from Retrieval_Result import RetrievalResult
+
+
+class HybridSearch:
+    def __init__(
+        self,
+        chroma_store,
+        bm25_store,
+        chroma_weight=1.0,
+        bm25_weight=1.0,
+        rrf_k=60,
+        candidate_multiplier=3,
+        min_candidates=20,
+    ):
+        self.chroma_store = chroma_store
+        self.bm25_store = bm25_store
+        self.chroma_weight = chroma_weight
+        self.bm25_weight = bm25_weight
+        self.rrf_k = rrf_k
+        self.candidate_multiplier = candidate_multiplier
+        self.min_candidates = min_candidates
+
+    def search(self, query, top_k=5) -> list[RetrievalResult]:
+        candidate_k = self._candidate_k(top_k)
+        chroma_results = self.chroma_store.query(query, n_results=candidate_k)
+        bm25_results = self.bm25_store.search(query, top_k=candidate_k)
+
+        return reciprocal_rank_fusion(
+            ranked_result_lists=[
+                (chroma_results, self.chroma_weight),
+                (bm25_results, self.bm25_weight),
+            ],
+            top_k=top_k,
+            rrf_k=self.rrf_k,
+        )
+
+    def search_many(self, queries, top_k=5) -> list[RetrievalResult]:
+        queries = list(queries)
+        if not queries:
+            return []
+
+        candidate_k = self._candidate_k(top_k)
+        ranked_result_lists = []
+
+        for query in queries:
+            ranked_result_lists.append(
+                (
+                    self.chroma_store.query(query, n_results=candidate_k),
+                    self.chroma_weight,
+                )
+            )
+            ranked_result_lists.append(
+                (self.bm25_store.search(query, top_k=candidate_k), self.bm25_weight)
+            )
+
+        return reciprocal_rank_fusion(
+            ranked_result_lists=ranked_result_lists,
+            top_k=top_k,
+            rrf_k=self.rrf_k,
+        )
+
+    def _candidate_k(self, top_k):
+        return max(top_k * self.candidate_multiplier, self.min_candidates)
+
+
+def reciprocal_rank_fusion(
+    ranked_result_lists,
+    top_k=5,
+    rrf_k=60,
+) -> list[RetrievalResult]:
+    merged_by_id = {}
+
+    for results, weight in ranked_result_lists:
+        seen_ids = set()
+
+        for rank, result in enumerate(results, start=1):
+            if result.id in seen_ids:
+                continue
+
+            seen_ids.add(result.id)
+            rrf_score = weight / (rrf_k + rank)
+            _merge_result(
+                merged_by_id=merged_by_id,
+                result=result,
+                score=rrf_score,
+            )
+
+    ranked_results = sorted(
+        merged_by_id.values(),
+        key=lambda result: result.score,
+        reverse=True,
+    )
+
+    return ranked_results[:top_k]
+
+
+def merge_results(
+    chroma_results,
+    bm25_results,
+    top_k=5,
+    chroma_weight=1.0,
+    bm25_weight=1.0,
+    rrf_k=60,
+) -> list[RetrievalResult]:
+    return reciprocal_rank_fusion(
+        ranked_result_lists=[
+            (chroma_results, chroma_weight),
+            (bm25_results, bm25_weight),
+        ],
+        top_k=top_k,
+        rrf_k=rrf_k,
+    )
+
+
+def _merge_result(merged_by_id, result, score):
+    existing_result = merged_by_id.get(result.id)
+    if existing_result is None:
+        merged_by_id[result.id] = RetrievalResult(
+            id=result.id,
+            text=result.text,
+            source_doc=result.source_doc,
+            chunk_index=result.chunk_index,
+            score=score,
+        )
+        return
+
+    existing_result.score += score
