@@ -6,6 +6,7 @@ from ..telemetry import log, reset_run_id, set_run_id
 from .evidence_adjudicator import distinct_source_family_count
 from .entity_resolution import EntityResolver, annotate_documents
 from .followup import build_contested_followup
+from .schemas import SufficiencyResult
 
 
 class AgentLoop:
@@ -96,6 +97,19 @@ class AgentLoop:
                         entity_validation_seconds,
                     )
                 if iteration > 0 and not new_documents:
+                    if result is not None and self._result_is_resolved(result):
+                        result.sufficient = True
+                        return self._result(
+                            all_documents,
+                            result,
+                            iteration,
+                            "sufficient_evidence",
+                            research_run_id,
+                            timeline,
+                            started,
+                            entity_extraction_seconds,
+                            entity_validation_seconds,
+                        )
                     log("No new evidence found; stopping search.")
                     timeline.append(
                         self._retrieval_stop_timeline_entry(
@@ -124,8 +138,19 @@ class AgentLoop:
                     )
 
                 # Follow-up queries affect retrieval only. The checker always
-                # evaluates the exact original user question.
-                result = self.sufficiency_checker.check(original_question, usable_documents)
+                # evaluates the exact original user question. Never let an
+                # empty direct-entity set be converted into a positive answer
+                # by an LLM interpreting unrelated retrieved chunks.
+                if not usable_documents and entities:
+                    result = SufficiencyResult(
+                        sufficient=False,
+                        missing=["direct evidence for the requested entity"],
+                        search_queries=[],
+                        evidence_ids=[],
+                        reason="No usable evidence matched the requested entity.",
+                    )
+                else:
+                    result = self.sufficiency_checker.check(original_question, usable_documents)
                 sufficiency_seconds = getattr(self.sufficiency_checker, "last_duration", None)
                 followup_started = perf_counter()
                 result = self._force_contested_followup(
@@ -136,11 +161,8 @@ class AgentLoop:
                     previous_queries | {current_query},
                 )
                 followup_seconds = perf_counter() - followup_started
-                if result.sufficient:
-                    result = self._adjudicate_if_needed(original_question, usable_documents, result)
-                    adjudication_seconds = getattr(self, "_last_adjudication_seconds", None)
-                else:
-                    adjudication_seconds = None
+                result = self._adjudicate_if_needed(original_question, usable_documents, result)
+                adjudication_seconds = getattr(self, "_last_adjudication_seconds", None)
                 log(f"Sufficient: {result.sufficient}")
                 log(f"Missing: {result.missing}")
                 log(f"Distinct source families examined: {distinct_source_family_count(all_documents)}")
@@ -256,7 +278,7 @@ class AgentLoop:
             )
 
         evidence_ids = conflict_result.evidence_ids() or sufficiency_result.evidence_ids
-        if conflict_result.resolved:
+        if conflict_result.resolved and not getattr(conflict_result, "needs_more_search", False):
             sufficiency_result.sufficient = True
             sufficiency_result.missing = []
             sufficiency_result.search_queries = []
@@ -275,6 +297,20 @@ class AgentLoop:
             or "Conflicting evidence requires targeted follow-up before answering."
         )
         return sufficiency_result
+
+    @staticmethod
+    def _result_is_resolved(result):
+        conflict = getattr(result, "conflict_result", None)
+        return bool(
+            result.sufficient
+            or (
+                conflict is not None
+                and conflict.resolved
+                and not getattr(conflict, "needs_more_search", False)
+                and bool(conflict.selected_value)
+                and not getattr(conflict, "parse_error", False)
+            )
+        )
 
     def _force_contested_followup(
         self,

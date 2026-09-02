@@ -1,0 +1,10 @@
+[project]
+name = "alchemyx"
+version = "0.1.0"
+description = "Retrieval-augmented QA system for the Ashen Era corpus"
+requires-python = ">=3.10"
+dependencies = []
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

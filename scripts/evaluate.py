@@ -24,6 +24,15 @@ def expected_chunk_rank(documents, expected_chunk):
     return None
 
 
+def expected_source_ranks(documents, expected_sources):
+    expected_sources = set(expected_sources or [])
+    ranks = {}
+    for rank, document in enumerate(documents, start=1):
+        if document.source_doc in expected_sources and document.source_doc not in ranks:
+            ranks[document.source_doc] = rank
+    return ranks
+
+
 def evaluate_questions(system, questions):
     rows = []
 
@@ -35,15 +44,38 @@ def evaluate_questions(system, questions):
             result.get("documents", []),
             item.get("expected_chunk"),
         )
+        expected_sources = item.get("expected_sources")
+        if expected_sources is None and item.get("expected_source"):
+            expected_sources = [item["expected_source"]]
+        source_ranks = expected_source_ranks(
+            result.get("documents", []),
+            expected_sources,
+        )
+        expected_source_count = len(expected_sources or [])
+        source_recall_at_5 = (
+            len([rank for rank in source_ranks.values() if rank <= 5])
+            / expected_source_count
+            if expected_source_count
+            else 0.0
+        )
         answer = result.get("answer", "")
 
         rows.append(
             {
                 "question": item["question"],
+                "query_type": item.get("query_type", "content"),
+                "answerable": item.get("answerable", True),
                 "expected_source": item.get("expected_source"),
+                "expected_sources": expected_sources or [],
                 "expected_chunk": item.get("expected_chunk"),
-                "retrieval_hit": rank is not None and rank <= 5,
+                "retrieval_hit": (
+                    rank is not None and rank <= 5
+                    if item.get("expected_chunk")
+                    else source_recall_at_5 > 0
+                ),
                 "expected_chunk_rank": rank,
+                "expected_source_ranks": source_ranks,
+                "source_recall_at_5": source_recall_at_5,
                 "iterations": result.get("iterations", 0),
                 "sufficiency_reached": result.get("stop_reason")
                 == "sufficient_evidence",
@@ -73,6 +105,9 @@ def summarize(rows):
 
     return {
         "recall_at_5": sum(row["retrieval_hit"] for row in rows) / len(rows),
+        "source_recall_at_5": (
+            sum(row["source_recall_at_5"] for row in rows) / len(rows)
+        ),
         "mrr": sum(reciprocal_ranks) / len(rows),
         "average_iterations": sum(row["iterations"] for row in rows) / len(rows),
         "success_rate": sum(row["sufficiency_reached"] for row in rows) / len(rows),

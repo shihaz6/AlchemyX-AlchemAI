@@ -16,6 +16,7 @@ try:
         DEFAULT_CHROMA_DIRECTORY,
         DEFAULT_DOCUMENT_REGISTRY_PATH,
         MIN_RERANK_SCORE,
+        VOYAGE_API_KEY,
         RERANK_CANDIDATES,
         RETRIEVAL_TOP_K,
     )
@@ -35,13 +36,14 @@ except ImportError:
         DEFAULT_CHROMA_DIRECTORY,
         DEFAULT_DOCUMENT_REGISTRY_PATH,
         MIN_RERANK_SCORE,
+        VOYAGE_API_KEY,
         RERANK_CANDIDATES,
         RETRIEVAL_TOP_K,
     )
 
 def get_api_key(api_key=None):
     load_dotenv(find_dotenv())
-    api_key = api_key or os.getenv("VOYAGE_API_KEY")
+    api_key = api_key or os.getenv("VOYAGE_API_KEY") or VOYAGE_API_KEY
     if not api_key:
         raise RuntimeError("VOYAGE_API_KEY is missing. Add it to the .env file.")
 

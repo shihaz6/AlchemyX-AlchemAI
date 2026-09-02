@@ -107,7 +107,10 @@ class EntityResolver:
             if matches.get(document.id)
             and matches[document.id].usable_for_direct_claim
         ]
-        return direct or documents
+        # For direct factual questions, an empty exact/alias set is a real
+        # absence of usable evidence. Returning mismatches here would let
+        # semantically similar entities answer the question.
+        return direct
 
 
 def _extract_question_entities(question):
@@ -188,12 +191,14 @@ def _validate_document(entities, document):
 
     evidence_entity = _first_named_entity(document.source_doc, document.text)
     if evidence_entity:
-        requested_tokens = set(normalize_entity(entities[0].name).split())
+        requested_tokens = set()
+        for entity in entities:
+            requested_tokens.update(normalize_entity(entity.name).split())
         evidence_tokens = set(normalize_entity(evidence_entity).split())
         match_type = "related_entity" if requested_tokens & evidence_tokens else "mismatch"
         return EntityMatchResult(
             evidence_id=document.id,
-            requested_entity=entities[0].name,
+            requested_entity=", ".join(entity.name for entity in entities),
             evidence_entity=evidence_entity,
             entity_match=match_type,
             usable_for_direct_claim=False,

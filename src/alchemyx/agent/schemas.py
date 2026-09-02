@@ -2,6 +2,18 @@ from dataclasses import dataclass, field
 
 
 @dataclass
+class Claim:
+    subject: str
+    predicate: str
+    value: str | None
+    claim_type: str = "direct"
+    certainty: str = "unknown"
+    evidence_id: str = ""
+    source_family_id: str = ""
+    references: list[str] = field(default_factory=list)
+
+
+@dataclass
 class ConflictResult:
     has_conflict: bool
     claim: str
@@ -14,6 +26,8 @@ class ConflictResult:
     selected_value: str = ""
     selected_evidence_ids: list[str] = field(default_factory=list)
     reason: str = ""
+    needs_more_search: bool = False
+    claims: list[Claim] = field(default_factory=list)
     parse_error: bool = False
     internal_errors: list[dict] = field(default_factory=list)
 

@@ -3,7 +3,7 @@ import re
 from pathlib import Path
 from time import perf_counter
 
-from .schemas import ConflictResult
+from .schemas import Claim, ConflictResult
 from ..telemetry import log
 from .structured_json import extract_json_object, parse_with_one_repair
 
@@ -78,7 +78,10 @@ class EvidenceAdjudicator:
                 "exact_match", "alias_match", "valid_contextual_match"
             }
         ]
-        if terms & CONFLICT_TERMS and len(_source_families(usable_documents)) > 1:
+        if (
+            len(_source_families(usable_documents)) > 1
+            and (terms & CONFLICT_TERMS or _has_distinct_value_claims(usable_documents))
+        ):
             return True
         # Authority-sensitive wording raises the threshold for sufficiency;
         # it does not by itself justify an adjudication call.
@@ -203,6 +206,8 @@ Return ONLY valid JSON with exactly this shape:
   "resolved": false,
   "selected_value": "",
   "selected_evidence_ids": [],
+  "needs_more_search": false,
+  "claims": [],
   "reason": ""
 }}
 """
@@ -248,30 +253,43 @@ def _parse_adjudication_data(data, documents, internal_errors=None):
     selected = _string_list(data.get("selected_evidence_ids"), allowed_ids=allowed_ids)
 
     result = ConflictResult(
-        has_conflict=bool(data.get("has_conflict", False)),
+        has_conflict=_strict_bool(data.get("has_conflict", False)),
         claim=_safe_text(data.get("claim")),
         candidate_values=_string_list(data.get("candidate_values")),
         supporting_evidence_ids=supporting,
         authority_notes=_string_list(data.get("authority_notes")),
         recommended_search_queries=_string_list(data.get("recommended_search_queries")),
-        resolvable=bool(data.get("resolvable", False)),
-        resolved=bool(data.get("resolved", False)),
+        resolvable=_strict_bool(data.get("resolvable", False)),
+        resolved=_strict_bool(data.get("resolved", False)),
         selected_value=_safe_text(data.get("selected_value")),
         selected_evidence_ids=selected,
         reason=_safe_text(data.get("reason")),
+        needs_more_search=_strict_bool(data.get("needs_more_search", False)),
+        claims=_claims_from_payload(data.get("claims"), documents),
         parse_error=bool(internal_errors or missing_fields),
         internal_errors=internal_errors,
     )
     if result.parse_error:
         return _fallback_conflict_result(internal_errors or [{"stage": "adjudication", "type": "invalid_schema", "message": "required fields were missing"}])
+    if result.resolved:
+        if not result.selected_value or result.selected_value not in result.candidate_values:
+            return _fallback_conflict_result([{"stage": "adjudication", "type": "invalid_decision", "message": "selected value was not a candidate"}])
+        selected_support = set(result.selected_evidence_ids)
+        if not selected_support.intersection(
+            set(result.supporting_evidence_ids.get(result.selected_value, []))
+        ):
+            return _fallback_conflict_result([{"stage": "adjudication", "type": "invalid_decision", "message": "selected evidence did not support selected value"}])
     return result
 
 
 def source_family_id(source_doc):
     path = Path(str(source_doc).replace("\\", "/"))
     suffix = path.suffix.lower()
-    stem = path.with_suffix("").as_posix() if suffix else path.as_posix()
+    # Format copies in different folders are still one work when their
+    # normalized document name is the same.
+    stem = path.stem if suffix else path.name
     stem = re.sub(r"(?i)(?:[._-]?scan)$", "", stem)
+    stem = re.sub(r"(?i)(?:[._ -]*(?:copy|duplicate|\(\d+\)))+$", "", stem)
     return stem.lower()
 
 
@@ -295,6 +313,52 @@ def _combined_text(question, documents, sufficiency_result):
 
 def _mentions_conflict(text):
     return bool(set(_tokens(text)) & CONFLICT_TERMS)
+
+
+def _has_distinct_value_claims(documents):
+    values = set()
+    for document in documents:
+        values.update(re.findall(r"\b\d+(?:\.\d+)?(?:\s*[A-Za-z]{1,6})?\b", document.text))
+        for match in re.finditer(
+            r"\b(?:is|was|were|equals?|means?|as)\s+(['\"]?)([A-Za-z][A-Za-z0-9_-]{1,30})\1\b",
+            document.text,
+            flags=re.IGNORECASE,
+        ):
+            value = match.group(2).lower()
+            if value not in {"a", "an", "the", "not", "no", "disputed", "unknown"}:
+                values.add(value)
+    return len(values) >= 2
+
+
+def _claims_from_payload(value, documents):
+    if not isinstance(value, list):
+        return []
+    allowed_ids = {document.id for document in documents}
+    claims = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        evidence_id = item.get("evidence_id")
+        if not isinstance(evidence_id, str) or evidence_id not in allowed_ids:
+            continue
+        subject = item.get("subject")
+        predicate = item.get("predicate")
+        if not isinstance(subject, str) or not subject.strip() or not isinstance(predicate, str) or not predicate.strip():
+            continue
+        raw_value = item.get("value")
+        claim_value = raw_value.strip() if isinstance(raw_value, str) else None
+        references = item.get("references")
+        claims.append(Claim(
+            subject=subject.strip(),
+            predicate=predicate.strip(),
+            value=claim_value,
+            claim_type=item.get("claim_type", "direct") if isinstance(item.get("claim_type", "direct"), str) else "direct",
+            certainty=item.get("certainty", "unknown") if isinstance(item.get("certainty", "unknown"), str) else "unknown",
+            evidence_id=evidence_id,
+            source_family_id=source_family_id(next(document.source_doc for document in documents if document.id == evidence_id)),
+            references=[reference for reference in references if isinstance(reference, str)] if isinstance(references, list) else [],
+        ))
+    return claims
 
 
 def _tokens(text):
@@ -340,6 +404,10 @@ def _safe_text(value):
     if value is None:
         return ""
     return str(value)
+
+
+def _strict_bool(value):
+    return value if isinstance(value, bool) else False
 
 
 def _fallback_conflict_result(internal_errors=None):

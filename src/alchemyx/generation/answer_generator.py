@@ -260,7 +260,7 @@ def validate_citation_support(answer, documents):
                 continue
             evidence_tokens = _meaningful_tokens(document.text)
             overlap = claim_tokens & evidence_tokens
-            if len(overlap) < min(2, len(claim_tokens)):
+            if len(overlap) < 1:
                 unsupported.append(evidence_id)
 
     if unsupported:
@@ -271,13 +271,19 @@ def validate_citation_support(answer, documents):
 
 
 def _documents_for_generation(documents, sufficiency_result):
+    conflict_result = getattr(sufficiency_result, "conflict_result", None)
+    if conflict_result is not None and conflict_result.has_conflict:
+        allowed_ids = set(conflict_result.evidence_ids())
+        selected_documents = [document for document in documents if document.id in allowed_ids]
+        if selected_documents:
+            return selected_documents
     if sufficiency_result is None or not sufficiency_result.evidence_ids:
         direct_documents = [
             document
             for document in documents
             if _usable_for_generation(document)
         ]
-        return direct_documents or documents
+        return direct_documents
 
     documents_by_id = {document.id: document for document in documents}
     selected_documents = [
@@ -285,7 +291,7 @@ def _documents_for_generation(documents, sufficiency_result):
         for evidence_id in sufficiency_result.evidence_ids
         if evidence_id in documents_by_id
     ]
-    return selected_documents or documents
+    return selected_documents
 
 
 def _usable_for_generation(document):

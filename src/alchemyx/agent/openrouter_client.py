@@ -1,21 +1,26 @@
 import os
 from time import perf_counter
 import requests
-from dotenv import find_dotenv, load_dotenv
-
-
-load_dotenv(find_dotenv())
+from ..config import (
+    OPENROUTER_API_KEY,
+    OPENROUTER_FALLBACK_MODELS,
+    OPENROUTER_MODEL,
+)
 
 
 class OpenRouterClient:
 
     def __init__(self):
 
-        self.api_key = os.getenv("OPENROUTER_API_KEY")
-        self.model = os.getenv("OPENROUTER_MODEL")
-        self.fallback_models = _parse_fallback_models(
-            os.getenv("OPENROUTER_FALLBACK_MODELS")
+        # Environment overrides remain useful for tests and process-level deployment
+        # configuration; the project-root .env remains the canonical local source.
+        self.api_key = os.getenv("OPENROUTER_API_KEY") or OPENROUTER_API_KEY
+        self.model = os.getenv("OPENROUTER_MODEL") or OPENROUTER_MODEL
+        fallback_models = os.getenv(
+            "OPENROUTER_FALLBACK_MODELS",
+            OPENROUTER_FALLBACK_MODELS,
         )
+        self.fallback_models = _parse_fallback_models(fallback_models)
 
         if not self.api_key:
             raise ValueError(

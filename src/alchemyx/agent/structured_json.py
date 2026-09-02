@@ -25,7 +25,11 @@ def parse_with_one_repair(response, repair_prompt, ask, log, stage):
         return payload, 0, []
     except (TypeError, ValueError, json.JSONDecodeError) as exc:
         log(f"{stage} parse failed; requesting one JSON repair: {type(exc).__name__}")
-        repair_response = ask(repair_prompt)
+        try:
+            repair_response = ask(repair_prompt)
+        except Exception as repair_exc:
+            log(f"{stage} JSON repair call failed: {type(repair_exc).__name__}")
+            return None, 1, [{"stage": stage, "type": "repair_call_failure", "message": str(repair_exc)}]
         try:
             payload = extract_json_object(repair_response)
             if not isinstance(payload, dict):

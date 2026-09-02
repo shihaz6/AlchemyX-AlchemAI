@@ -1,5 +1,20 @@
-VOYAGE_MODEL = "voyage-4-lite"
-RERANK_MODEL = "rerank-2.5"
+import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+
+# Load one project-root configuration file for every application entry point.
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+load_dotenv(PROJECT_ROOT / ".env")
+
+VOYAGE_API_KEY = os.getenv("VOYAGE_API_KEY", "")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "openrouter/free")
+OPENROUTER_FALLBACK_MODELS = os.getenv("OPENROUTER_FALLBACK_MODELS", "")
+
+VOYAGE_MODEL = os.getenv("VOYAGE_MODEL", "voyage-4-lite")
+RERANK_MODEL = os.getenv("RERANK_MODEL", "rerank-2.5")
 
 RRF_K = 60
 RETRIEVAL_TOP_K = 5

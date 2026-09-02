@@ -114,6 +114,8 @@ def build_sources(documents, citations, sufficiency_result=None, answer_evidence
     conflict_result = getattr(sufficiency_result, "conflict_result", None)
     selected_ids = set(getattr(conflict_result, "selected_evidence_ids", []) or [])
     answer_ids = set(answer_evidence_ids or [])
+    if conflict_result is not None and conflict_result.has_conflict:
+        answer_ids = set()
     sufficiency_ids = set(getattr(sufficiency_result, "evidence_ids", []) or [])
     conflicted_ids = set()
     claims_by_id = {}
@@ -166,14 +168,15 @@ def build_sources(documents, citations, sufficiency_result=None, answer_evidence
             source["chunk_numbers"].append(document.chunk_index)
         if not source["excerpt"]:
             source["excerpt"] = document.text[:300]
-        source["technical_details"].append(
-            {
-                "id": document.id,
-                "source_doc": document.source_doc,
-                "chunk_index": document.chunk_index,
-                "score": document.score,
-            }
-        )
+        technical_detail = {
+            "id": document.id,
+            "source_doc": document.source_doc,
+            "chunk_index": document.chunk_index,
+            "score": document.score,
+        }
+        if _page_number(document) is not None:
+            technical_detail["page_number"] = _page_number(document)
+        source["technical_details"].append(technical_detail)
         entity_match = getattr(document, "entity_match", None)
         if entity_match is not None:
             claim_match = _document_is_usable(document, claims_by_id.get(document.id))
@@ -251,6 +254,7 @@ def build_technical_sources(documents, citations) -> list[dict]:
             "title": citation_by_id.get(document.id, {}).get("source", document.source_doc),
             "source_doc": document.source_doc,
             "chunk_index": document.chunk_index,
+            "page_number": _page_number(document),
             "type": "Document",
             "text": document.text,
             "excerpt": document.text[:300],
@@ -393,8 +397,17 @@ def clean_answer(answer, sources=None):
     cleaned = str(answer or "")
     chunk_label_by_id = {}
     for source in sources or []:
+        details_by_id = {
+            detail.get("id"): detail
+            for detail in source.get("technical_details", [])
+        }
         for chunk_id in source.get("chunk_ids", []):
-            chunk_label_by_id[chunk_id] = source.get("title", chunk_id)
+            detail = details_by_id.get(chunk_id, {})
+            document_type = detail.get("source_doc", "").rsplit(".", 1)[-1].upper()
+            page_number = detail.get("page_number")
+            location = f"page {page_number}" if page_number is not None else f"chunk {detail.get('chunk_index', '?')}"
+            suffix = f"{document_type}, {location}" if document_type else location
+            chunk_label_by_id[chunk_id] = f"{source.get('title', chunk_id)} ({suffix})"
 
     def replace_ids(match):
         ids = [part.strip() for part in match.group(1).split(",")]
@@ -432,6 +445,20 @@ def readable_source_label(source_doc):
         else:
             titled.append(lower.capitalize())
     return " ".join(titled) or str(source_doc)
+
+
+def _page_number(document):
+    for name in ("page_number", "page", "page_num"):
+        value = getattr(document, name, None)
+        if isinstance(value, int) and value >= 0:
+            return value
+    metadata = getattr(document, "metadata", None)
+    if isinstance(metadata, dict):
+        for name in ("page_number", "page", "page_num"):
+            value = metadata.get(name)
+            if isinstance(value, int) and value >= 0:
+                return value
+    return None
 
 
 def readable_document_type(source_doc):

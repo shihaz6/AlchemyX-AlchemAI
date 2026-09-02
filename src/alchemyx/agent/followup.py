@@ -131,9 +131,9 @@ def _is_contested(text):
 
 def _entity_text(entities, question):
     if entities:
-        name = entities[0].name
-        if name.lower() not in GENERIC_ENTITY_TEXT:
-            return name
+        names = [entity.name for entity in entities if entity.name.lower() not in GENERIC_ENTITY_TEXT]
+        if names:
+            return " and ".join(names)
     quoted = re.findall(r"['\"]([^'\"]{2,80})['\"]", question)
     if quoted:
         return quoted[0]
