@@ -1,103 +1,70 @@
-class AgentLoop:
+from time import perf_counter
+from uuid import uuid4
 
-    MAX_ITERATIONS = 4
+from ..config import MAX_AGENT_ITERATIONS
+from ..telemetry import log, reset_run_id, set_run_id
+
+
+class AgentLoop:
+    MAX_ITERATIONS = MAX_AGENT_ITERATIONS
 
     def __init__(self, retrieval_pipeline, sufficiency_checker):
-
         self.retrieval_pipeline = retrieval_pipeline
         self.sufficiency_checker = sufficiency_checker
 
-    def run(self, question):
-
+    def run(self, question, run_id=None):
+        original_question = question
+        research_run_id = run_id or uuid4().hex[:6]
+        token = set_run_id(research_run_id)
+        started = perf_counter()
         all_documents = []
         seen_document_ids = set()
-
-        current_query = question
+        current_query = original_question
         previous_queries = set()
+        result = None
+        try:
+            for iteration in range(self.MAX_ITERATIONS):
+                iteration_started = perf_counter()
+                log(f"ITERATION {iteration + 1}")
+                log(f"Query: {current_query}")
+                retrieved = self.retrieval_pipeline.query(current_query)
+                for document in retrieved:
+                    if document.id not in seen_document_ids:
+                        all_documents.append(document)
+                        seen_document_ids.add(document.id)
 
-        for iteration in range(self.MAX_ITERATIONS):
+                if not retrieved and not all_documents:
+                    return self._result([], None, iteration + 1, "no_retrieval_results", research_run_id)
 
-            print(f"\n===== ITERATION {iteration + 1} =====")
-            print(f"Query: {current_query}")
+                # Follow-up queries affect retrieval only. The checker always
+                # evaluates the exact original user question.
+                result = self.sufficiency_checker.check(original_question, all_documents)
+                log(f"Sufficient: {result.sufficient}")
+                log(f"Missing: {result.missing}")
+                log(f"Iteration {iteration + 1} total: {perf_counter() - iteration_started:.2f}s")
 
-            # 1. Retrieve documents
-            retrieved = self.retrieval_pipeline.query(
-                current_query
-            )
+                if result.sufficient:
+                    return self._result(all_documents, result, iteration + 1, "sufficient_evidence", research_run_id)
+                if not result.search_queries:
+                    return self._result(all_documents, result, iteration + 1, "no_search_query", research_run_id)
 
-            # 2. Add only new documents
-            for document in retrieved:
+                next_query = result.search_queries[0]
+                previous_queries.add(current_query)
+                if next_query in previous_queries:
+                    return self._result(all_documents, result, iteration + 1, "repeated_query", research_run_id)
+                current_query = next_query
 
-                document_id = document.id
+            return self._result(all_documents, result, self.MAX_ITERATIONS, "max_iterations", research_run_id)
+        finally:
+            log(f"TOTAL: {perf_counter() - started:.2f}s")
+            reset_run_id(token)
 
-                if document_id not in seen_document_ids:
-
-                    all_documents.append(document)
-                    seen_document_ids.add(document_id)
-
-            # 3. Check sufficiency
-            result = self.sufficiency_checker.check(
-                question,
-                all_documents
-            )
-
-            print("Sufficient:", result.sufficient)
-            print("Missing:", result.missing)
-
-            # 4. Stop if enough evidence exists
-            if result.sufficient:
-
-                print("\nStopping: sufficient evidence found.")
-
-                return {
-                    "documents": all_documents,
-                    "result": result,
-                    "iterations": iteration + 1,
-                    "stop_reason": "sufficient_evidence"
-                }
-
-            # 5. Stop if no search query was generated
-            if not result.search_queries:
-
-                print(
-                    "\nStopping: no actionable search query."
-                )
-
-                return {
-                    "documents": all_documents,
-                    "result": result,
-                    "iterations": iteration + 1,
-                    "stop_reason": "no_search_query"
-                }
-
-            # 6. Select next query
-            next_query = result.search_queries[0]
-            previous_queries.add(current_query)
-
-            # 7. Prevent repeated queries
-            if next_query in previous_queries:
-
-                print(
-                    "\nStopping: repeated search query."
-                )
-
-                return {
-                    "documents": all_documents,
-                    "result": result,
-                    "iterations": iteration + 1,
-                    "stop_reason": "repeated_query"
-                }
-
-            current_query = next_query
-
-        # Maximum iterations reached
-        print(
-            "\nStopping: maximum iterations reached."
-        )
-
+    @staticmethod
+    def _result(documents, result, iterations, stop_reason, research_run_id):
         return {
-            "documents": all_documents,
+            "documents": documents,
             "result": result,
-            "iterations": self.MAX_ITERATIONS,
-            "stop_reason": "max_iterations"
+            "iterations": iterations,
+            "stop_reason": stop_reason,
+            "research_run_id": research_run_id,
         }

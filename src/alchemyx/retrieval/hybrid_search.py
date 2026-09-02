@@ -1,7 +1,12 @@
+from time import perf_counter
+
 try:
     from .Retrieval_Result import RetrievalResult
+    from ..config import RRF_K
 except ImportError:
     from Retrieval_Result import RetrievalResult
+    from src.alchemyx.config import RRF_K
+from ..telemetry import log
 
 
 class HybridSearch:
@@ -11,7 +16,7 @@ class HybridSearch:
         bm25_store,
         chroma_weight=1.0,
         bm25_weight=1.0,
-        rrf_k=60,
+        rrf_k=RRF_K,
         candidate_multiplier=3,
         min_candidates=20,
     ):
@@ -24,11 +29,15 @@ class HybridSearch:
         self.min_candidates = min_candidates
 
     def search(self, query, top_k=5) -> list[RetrievalResult]:
+        started = perf_counter()
         candidate_k = self._candidate_k(top_k)
         chroma_results = self.chroma_store.query(query, n_results=candidate_k)
+        bm25_started = perf_counter()
         bm25_results = self.bm25_store.search(query, top_k=candidate_k)
+        log(f"BM25 retrieval: {perf_counter() - bm25_started:.2f}s")
 
-        return reciprocal_rank_fusion(
+        fusion_started = perf_counter()
+        fused = reciprocal_rank_fusion(
             ranked_result_lists=[
                 (chroma_results, self.chroma_weight),
                 (bm25_results, self.bm25_weight),
@@ -36,6 +45,9 @@ class HybridSearch:
             top_k=top_k,
             rrf_k=self.rrf_k,
         )
+        log(f"RRF fusion: {perf_counter() - fusion_started:.2f}s")
+        log(f"Hybrid retrieval: {perf_counter() - started:.2f}s")
+        return fused
 
     def search_many(self, queries, top_k=5) -> list[RetrievalResult]:
         queries = list(queries)
@@ -69,7 +81,7 @@ class HybridSearch:
 def reciprocal_rank_fusion(
     ranked_result_lists,
     top_k=5,
-    rrf_k=60,
+    rrf_k=RRF_K,
 ) -> list[RetrievalResult]:
     merged_by_id = {}
 
@@ -103,7 +115,7 @@ def merge_results(
     top_k=5,
     chroma_weight=1.0,
     bm25_weight=1.0,
-    rrf_k=60,
+    rrf_k=RRF_K,
 ) -> list[RetrievalResult]:
     return reciprocal_rank_fusion(
         ranked_result_lists=[

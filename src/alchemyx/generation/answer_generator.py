@@ -14,6 +14,15 @@ class AnswerGenerator:
         self.llm_client = llm_client or OpenRouterClient()
 
     def generate(self, question, documents, sufficiency_result=None):
+        if not documents:
+            return GeneratedAnswer(
+                answer=(
+                    "I could not find sufficient evidence in the indexed corpus "
+                    "to answer that question."
+                ),
+                evidence_ids=[],
+            )
+
         prompt = build_answer_prompt(question, documents, sufficiency_result)
         answer = self.llm_client.ask(prompt)
         return GeneratedAnswer(

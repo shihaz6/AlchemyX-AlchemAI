@@ -1,4 +1,6 @@
+import json
 import re
+from pathlib import Path
 
 from rank_bm25 import BM25Okapi
 
@@ -9,14 +11,17 @@ except ImportError:
 
 
 class BM25Store:
-    def __init__(self):
+    def __init__(self, persist_path=None):
+        self.persist_path = Path(persist_path) if persist_path else None
         self.documents = []
         self.tokenized_documents = []
         self.bm25 = None
+        self._load()
 
     def add_documents(self, documents):
         self.documents.extend(documents)
         self._rebuild()
+        self._save()
 
     def replace_documents(self, source_doc, documents):
         self.documents = [
@@ -26,6 +31,7 @@ class BM25Store:
         ]
         self.documents.extend(documents)
         self._rebuild()
+        self._save()
 
     def _rebuild(self):
         self.tokenized_documents = [
@@ -36,6 +42,31 @@ class BM25Store:
             BM25Okapi(self.tokenized_documents)
             if self.tokenized_documents
             else None
+        )
+
+    def _load(self):
+        if self.persist_path is None or not self.persist_path.exists():
+            return
+
+        try:
+            data = json.loads(self.persist_path.read_text(encoding="utf-8"))
+            documents = data.get("documents", [])
+            if isinstance(documents, list):
+                self.documents = documents
+                self._rebuild()
+        except (OSError, json.JSONDecodeError, TypeError, AttributeError):
+            self.documents = []
+            self._rebuild()
+
+    def _save(self):
+        if self.persist_path is None:
+            return
+
+        self.persist_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {"documents": self.documents}
+        self.persist_path.write_text(
+            json.dumps(payload, ensure_ascii=True),
+            encoding="utf-8",
         )
 
     def search(self, query, top_k=5):

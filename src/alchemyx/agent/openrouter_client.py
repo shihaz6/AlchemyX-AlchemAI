@@ -32,7 +32,7 @@ class OpenRouterClient:
             "Content-Type": "application/json"
         }
 
-        data = {
+        payload = {
             "model": self.model,
             "messages": [
                 {
@@ -41,16 +41,43 @@ class OpenRouterClient:
                 }
             ]
         }
-
         response = requests.post(
             self.url,
             headers=headers,
-            json=data,
+            json=payload,
             timeout=60
         )
 
-        response.raise_for_status()
+        if not response.ok:
+            raise RuntimeError(
+                f"OpenRouter returned {response.status_code}: {response.text}"
+            )
 
-        result = response.json()
+        try:
+            data = response.json()
+        except ValueError as exc:
+            raise RuntimeError(
+                f"OpenRouter returned invalid JSON ({response.status_code}): "
+                f"{response.text}"
+            ) from exc
 
-        return result["choices"][0]["message"]["content"]
+        choices = data.get("choices") if isinstance(data, dict) else None
+        if not choices:
+            provider_error = data.get("error") if isinstance(data, dict) else data
+            raise RuntimeError(
+                "OpenRouter response did not contain any choices. "
+                f"Provider response: {provider_error!r}"
+            )
+
+        try:
+            content = choices[0]["message"]["content"]
+        except (IndexError, KeyError, TypeError) as exc:
+            raise RuntimeError(
+                f"OpenRouter returned an invalid completion shape: {data!r}"
+            ) from exc
+
+        if not isinstance(content, str) or not content.strip():
+            raise RuntimeError(
+                f"OpenRouter returned empty completion content: {data!r}"
+            )
+        return content

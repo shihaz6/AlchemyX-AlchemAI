@@ -1,10 +1,13 @@
 try:
     from ..retrieval.Retrieval_Result import RetrievalResult
+    from ..config import MIN_RERANK_SCORE, RERANK_CANDIDATES, RETRIEVAL_TOP_K
 except ImportError:
     try:
         from alchemyx.retrieval.Retrieval_Result import RetrievalResult
+        from alchemyx.config import MIN_RERANK_SCORE, RERANK_CANDIDATES, RETRIEVAL_TOP_K
     except ImportError:
         from src.alchemyx.retrieval.Retrieval_Result import RetrievalResult
+        from src.alchemyx.config import MIN_RERANK_SCORE, RERANK_CANDIDATES, RETRIEVAL_TOP_K
 
 
 class HybridRerankRetrievalPipeline:
@@ -12,9 +15,9 @@ class HybridRerankRetrievalPipeline:
         self,
         hybrid_search,
         reranker,
-        candidate_k=15,
-        top_k=5,
-        min_relevance_score=0.5,
+        candidate_k=RERANK_CANDIDATES,
+        top_k=RETRIEVAL_TOP_K,
+        min_relevance_score=MIN_RERANK_SCORE,
     ):
         self.hybrid_search = hybrid_search
         self.reranker = reranker

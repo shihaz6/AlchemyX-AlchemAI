@@ -1,15 +1,36 @@
+import time
+from time import perf_counter
+
 import voyageai
 
 try:
     from .Retrieval_Result import RetrievalResult
+    from ..config import (
+        RERANK_MODEL,
+        VOYAGE_MAX_RETRIES,
+        VOYAGE_RETRY_BASE_SECONDS,
+    )
 except ImportError:
     from Retrieval_Result import RetrievalResult
+    from src.alchemyx.config import (
+        RERANK_MODEL,
+        VOYAGE_MAX_RETRIES,
+        VOYAGE_RETRY_BASE_SECONDS,
+    )
 
 
 class Reranker:
-    def __init__(self, api_key, min_relevance_score=0.0):
+    def __init__(
+        self,
+        api_key,
+        min_relevance_score=0.0,
+        max_retries=VOYAGE_MAX_RETRIES,
+        retry_base_seconds=VOYAGE_RETRY_BASE_SECONDS,
+    ):
         self.client = voyageai.Client(api_key=api_key)
         self.min_relevance_score = min_relevance_score
+        self.max_retries = max_retries
+        self.retry_base_seconds = retry_base_seconds
 
     def rerank(self, query, results, top_k=5, min_relevance_score=None):
         if not results:
@@ -22,12 +43,20 @@ class Reranker:
         )
         documents = [result.text for result in results]
 
-        response = self.client.rerank(
-            query=query,
-            documents=documents,
-            model="rerank-2.5",
-            top_k=top_k,
-        )
+        started = perf_counter()
+        for attempt in range(self.max_retries + 1):
+            try:
+                response = self.client.rerank(
+                    query=query,
+                    documents=documents,
+                    model=RERANK_MODEL,
+                    top_k=top_k,
+                )
+                break
+            except Exception:
+                if attempt >= self.max_retries:
+                    raise
+                time.sleep(self.retry_base_seconds * (2 ** attempt))
 
         reranked = []
 
@@ -47,4 +76,6 @@ class Reranker:
                 )
             )
 
+        from ..telemetry import log
+        log(f"Reranking: {perf_counter() - started:.2f}s")
         return reranked
