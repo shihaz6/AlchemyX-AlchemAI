@@ -1,4 +1,5 @@
 import os
+from time import perf_counter
 import requests
 from dotenv import find_dotenv, load_dotenv
 
@@ -12,6 +13,9 @@ class OpenRouterClient:
 
         self.api_key = os.getenv("OPENROUTER_API_KEY")
         self.model = os.getenv("OPENROUTER_MODEL")
+        self.fallback_models = _parse_fallback_models(
+            os.getenv("OPENROUTER_FALLBACK_MODELS")
+        )
 
         if not self.api_key:
             raise ValueError(
@@ -24,8 +28,50 @@ class OpenRouterClient:
             )
 
         self.url = "https://openrouter.ai/api/v1/chat/completions"
+        self.call_log = []
 
-    def ask(self, prompt):
+    def ask(self, prompt, purpose="unknown"):
+        errors = []
+        for model in self._model_sequence():
+            started = perf_counter()
+            response = self._post(prompt, model)
+            elapsed = perf_counter() - started
+            from ..telemetry import log
+            call = {
+                "purpose": purpose,
+                "model": model,
+                "prompt_chars": len(prompt) if isinstance(prompt, str) else 0,
+                "duration": elapsed,
+                "provider_status": response.status_code,
+                "retry_count": len(self.call_log),
+            }
+            self.call_log.append(call)
+            log(
+                f"OpenRouter call purpose={purpose} model={model} "
+                f"status={response.status_code} prompt_chars={call['prompt_chars']} "
+                f"time={elapsed:.2f}s"
+            )
+            if not response.ok:
+                error_text = f"OpenRouter returned {response.status_code}: {response.text}"
+                if _is_free_model_unavailable(response):
+                    errors.append(error_text)
+                    continue
+                raise RuntimeError(error_text)
+
+            try:
+                return self._parse_completion(response)
+            except RuntimeError as exc:
+                errors.append(str(exc))
+                if model != "openrouter/free":
+                    continue
+                raise
+
+        raise RuntimeError(
+            "OpenRouter did not return a completion from any configured free "
+            f"model. Errors: {' | '.join(errors)}"
+        )
+
+    def _post(self, prompt, model):
 
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -33,7 +79,8 @@ class OpenRouterClient:
         }
 
         payload = {
-            "model": self.model,
+            "model": model,
+            "temperature": 0,
             "messages": [
                 {
                     "role": "user",
@@ -41,13 +88,14 @@ class OpenRouterClient:
                 }
             ]
         }
-        response = requests.post(
+        return requests.post(
             self.url,
             headers=headers,
             json=payload,
             timeout=60
         )
 
+    def _parse_completion(self, response):
         if not response.ok:
             raise RuntimeError(
                 f"OpenRouter returned {response.status_code}: {response.text}"
@@ -81,3 +129,28 @@ class OpenRouterClient:
                 f"OpenRouter returned empty completion content: {data!r}"
             )
         return content
+
+    def _model_sequence(self):
+        models = [self.model, *self.fallback_models, "openrouter/free"]
+        sequence = []
+        for model in models:
+            if model and model not in sequence:
+                sequence.append(model)
+        return sequence
+
+
+def _parse_fallback_models(value):
+    if not value:
+        return []
+    return [
+        model.strip()
+        for model in value.split(",")
+        if model.strip()
+    ]
+
+
+def _is_free_model_unavailable(response):
+    if response.status_code != 404:
+        return False
+    text = response.text.lower()
+    return "unavailable for free" in text or "use this slug instead" in text

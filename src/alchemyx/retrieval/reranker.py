@@ -17,6 +17,14 @@ except ImportError:
         VOYAGE_MAX_RETRIES,
         VOYAGE_RETRY_BASE_SECONDS,
     )
+try:
+    from .voyage_diagnostics import log_voyage_rerank
+except ImportError:
+    from voyage_diagnostics import log_voyage_rerank
+try:
+    from ..telemetry import log
+except ImportError:
+    from src.alchemyx.telemetry import log
 
 
 class Reranker:
@@ -34,6 +42,7 @@ class Reranker:
 
     def rerank(self, query, results, top_k=5, min_relevance_score=None):
         if not results:
+            log("Voyage rerank bypassed=true fallback_to_bm25=false reason=no_candidates")
             return []
 
         threshold = (
@@ -51,6 +60,12 @@ class Reranker:
                     documents=documents,
                     model=RERANK_MODEL,
                     top_k=top_k,
+                )
+                log_voyage_rerank(
+                    model=RERANK_MODEL,
+                    candidates=len(documents),
+                    response=response,
+                    started=started,
                 )
                 break
             except Exception:
@@ -76,6 +91,5 @@ class Reranker:
                 )
             )
 
-        from ..telemetry import log
         log(f"Reranking: {perf_counter() - started:.2f}s")
         return reranked

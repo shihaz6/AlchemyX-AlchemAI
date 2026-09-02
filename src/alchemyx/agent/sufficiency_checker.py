@@ -1,9 +1,9 @@
 import json
-import re
 from time import perf_counter
 
 from .prompts import build_sufficiency_prompt
 from .schemas import SufficiencyResult
+from .structured_json import extract_json_object, parse_with_one_repair
 
 
 class SufficiencyChecker:
@@ -19,21 +19,45 @@ class SufficiencyChecker:
         )
 
         started = perf_counter()
-        response = self.llm_client.ask(prompt)
+        response = self._ask(prompt, "sufficiency")
         from ..telemetry import log
-        log(f"Sufficiency check: {perf_counter() - started:.2f}s")
+        self.last_duration = perf_counter() - started
+        log(f"Sufficiency check: {self.last_duration:.2f}s")
 
-        return self._parse_response(response)
+        repair_prompt = (
+            "Return only valid JSON matching the sufficiency schema. No markdown "
+            "or commentary."
+        )
+        data, retries, errors = parse_with_one_repair(
+            response, repair_prompt, lambda value: self._ask(value, "sufficiency_repair"), log, "sufficiency"
+        )
+        self.last_retry_count = retries
+        return self._parse_data(data, documents, errors)
 
-    def _parse_response(self, response):
-
+    def _ask(self, prompt, purpose):
         try:
-            data = json.loads(self._extract_json(response))
+            return self.llm_client.ask(prompt, purpose=purpose)
+        except TypeError:
+            return self.llm_client.ask(prompt)
 
-        except json.JSONDecodeError:
-            raise ValueError(
-                f"LLM returned invalid JSON:\n{response}"
-            )
+    def _parse_response(self, response, documents):
+        from ..telemetry import log
+        data, retries, errors = parse_with_one_repair(
+            response,
+            "Return only valid JSON matching the sufficiency schema. No markdown or commentary.",
+            self.llm_client.ask,
+            log,
+            "sufficiency",
+        )
+        self.last_retry_count = retries
+        return self._parse_data(data, documents, errors)
+
+    def _parse_data(self, data, documents, internal_errors=None):
+        internal_errors = internal_errors or []
+        if data is None:
+            return _fallback_sufficiency_result(internal_errors)
+        if not isinstance(data, dict):
+            return _fallback_sufficiency_result([{"stage": "sufficiency", "type": "invalid_schema", "message": "top-level payload was not an object"}])
 
         required_fields = [
             "sufficient",
@@ -43,65 +67,76 @@ class SufficiencyChecker:
             "reason"
         ]
 
-        for field in required_fields:
+        missing_fields = [field for field in required_fields if field not in data]
+        if missing_fields:
+            from ..telemetry import log
+            log(f"Sufficiency response missing fields: {missing_fields}")
+            internal_errors = list(internal_errors) + [{
+                "stage": "sufficiency",
+                "type": "invalid_schema",
+                "message": "required fields were missing",
+            }]
 
-            if field not in data:
-                raise ValueError(
-                    f"Missing field from LLM response: {field}"
-                )
-
-        if not isinstance(data["sufficient"], bool):
-            raise ValueError(
-                "'sufficient' must be true or false"
-            )
-
-        if not isinstance(data["missing"], list):
-            raise ValueError(
-                "'missing' must be a list"
-            )
-
-        if not isinstance(data["search_queries"], list):
-            raise ValueError(
-                "'search_queries' must be a list"
-            )
-
-        if not isinstance(data["evidence_ids"], list):
-            raise ValueError(
-                "'evidence_ids' must be a list"
-            )
-
-        if not isinstance(data["reason"], str):
-            raise ValueError(
-                "'reason' must be a string"
-            )
+        allowed_ids = {document.id for document in documents}
+        raw_evidence_ids = _string_list(data.get("evidence_ids"))
+        evidence_ids = _string_list(raw_evidence_ids, allowed_ids=allowed_ids)
+        sufficient = data.get("sufficient", False)
+        if not isinstance(sufficient, bool):
+            sufficient = False
+        if sufficient and raw_evidence_ids and not evidence_ids:
+            sufficient = False
+        if sufficient and missing_fields:
+            sufficient = False
 
         return SufficiencyResult(
-            sufficient=data["sufficient"],
-            missing=data["missing"],
-            search_queries=data["search_queries"],
-            evidence_ids=data["evidence_ids"],
-            reason=data["reason"]
+            sufficient=sufficient,
+            missing=_string_list(data.get("missing")) or (["usable sufficiency assessment"] if missing_fields else []),
+            search_queries=_string_list(data.get("search_queries")),
+            evidence_ids=evidence_ids,
+            reason=_safe_text(data.get("reason")) or "Sufficiency response was malformed.",
+            parse_error=bool(internal_errors or missing_fields),
+            internal_errors=internal_errors,
         )
 
-    @staticmethod
-    def _extract_json(response):
-        """Accept JSON returned plainly or inside a Markdown code fence."""
-        if not isinstance(response, str):
-            raise json.JSONDecodeError("response is not text", repr(response), 0)
+    _extract_json = staticmethod(extract_json_object)
 
-        cleaned = response.strip()
-        fenced = re.fullmatch(
-            r"```(?:json)?\s*(.*?)\s*```",
-            cleaned,
-            flags=re.IGNORECASE | re.DOTALL,
-        )
-        if fenced:
-            return fenced.group(1).strip()
 
-        # Some providers add a short sentence around an otherwise valid JSON
-        # object. Keep parsing strict enough to reject arbitrary prose.
-        start = cleaned.find("{")
-        end = cleaned.rfind("}")
-        if start >= 0 and end > start:
-            return cleaned[start:end + 1]
-        return cleaned
+def _string_list(value, allowed_ids=None):
+    if value is None:
+        return []
+    if isinstance(value, str):
+        values = [value]
+    elif isinstance(value, list):
+        values = value
+    else:
+        return []
+
+    result = []
+    for item in values:
+        if not isinstance(item, str):
+            continue
+        if allowed_ids is not None and item not in allowed_ids:
+            continue
+        if item not in result:
+            result.append(item)
+    return result
+
+
+def _safe_text(value):
+    if isinstance(value, str):
+        return value
+    if value is None:
+        return ""
+    return str(value)
+
+
+def _fallback_sufficiency_result(internal_errors=None):
+    return SufficiencyResult(
+        sufficient=False,
+        missing=[],
+        search_queries=[],
+        evidence_ids=[],
+        reason="Sufficiency response was invalid JSON.",
+        parse_error=True,
+        internal_errors=internal_errors or [{"stage": "sufficiency", "type": "invalid_json", "message": "structured output could not be parsed"}],
+    )

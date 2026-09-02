@@ -3,10 +3,14 @@ from time import perf_counter
 from pathlib import Path
 
 import chromadb
+
+INDEX_SCHEMA_VERSION = 5
+
 try:
     from .Retrieval_Result import RetrievalResult
     from .embeddings import VoyageEmbeddingFunction
     from .chunking import chunk_text
+    from .document_metadata import build_searchable_text
     from ..config import (
         DEFAULT_CHROMA_DIRECTORY,
         DEFAULT_COLLECTION_NAME,
@@ -16,6 +20,7 @@ except ImportError:
     from Retrieval_Result import RetrievalResult
     from embeddings import VoyageEmbeddingFunction
     from chunking import chunk_text
+    from document_metadata import build_searchable_text
     from src.alchemyx.config import (
         DEFAULT_CHROMA_DIRECTORY,
         DEFAULT_COLLECTION_NAME,
@@ -43,9 +48,18 @@ class RetrievalPipeline:
         )
         self._last_timing = {}
 
-    def add_document(self, doc_id, text, chunk_size=300, overlap=50):
+    def add_document(self, doc_id, text, chunk_size=300, overlap=50, metadata=None):
 
-        chunks = chunk_text(text, chunk_size=chunk_size, overlap=overlap)
+        chunks = chunk_text(
+            text,
+            chunk_size=chunk_size,
+            overlap=overlap,
+            document_type=(metadata or {}).get("document_type"),
+        )
+        searchable_chunks = [
+            build_searchable_text(chunk, metadata)
+            for chunk in chunks
+        ]
 
         chunk_ids = [f"{doc_id}_chunk{i}" for i in range(len(chunks))]
 
@@ -53,9 +67,11 @@ class RetrievalPipeline:
         content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
         metadatas = [
             {
+                **(metadata or {}),
                 "source_doc": doc_id,
                 "chunk_index": i,
                 "content_hash": content_hash,
+                "index_schema_version": INDEX_SCHEMA_VERSION,
             }
             for i in range(len(chunks))
         ]
@@ -71,12 +87,32 @@ class RetrievalPipeline:
         for start in range(0, len(chunks), EMBEDDING_BATCH_SIZE):
             end = start + EMBEDDING_BATCH_SIZE
             self.collection.add(
-                documents=chunks[start:end],
+                documents=searchable_chunks[start:end],
                 ids=chunk_ids[start:end],
                 metadatas=metadatas[start:end]
             )
 
         print(f"Added {len(chunks)} chunks from '{doc_id}'")
+
+    def delete_documents_except(self, source_docs):
+        source_docs = set(source_docs)
+        records = self.collection.get(include=["metadatas"])
+        ids = records.get("ids") or []
+        metadatas = records.get("metadatas") or []
+        ids_to_delete = []
+        removed_source_docs = set()
+
+        for index, result_id in enumerate(ids):
+            metadata = metadatas[index] if index < len(metadatas) and metadatas[index] else {}
+            source_doc = metadata.get("source_doc", "")
+            if source_doc not in source_docs:
+                ids_to_delete.append(result_id)
+                removed_source_docs.add(source_doc or result_id)
+
+        if ids_to_delete:
+            self.collection.delete(ids=ids_to_delete)
+
+        return sorted(removed_source_docs)
 
     def has_document(self, doc_id, text=None):
         """Return whether Chroma already contains the current document version."""
@@ -89,11 +125,15 @@ class RetrievalPipeline:
         if not ids:
             return False
 
+        metadatas = records.get("metadatas") or []
+        metadata = metadatas[0] if metadatas else {}
+        if metadata.get("index_schema_version") != INDEX_SCHEMA_VERSION:
+            return False
+
         if text is None:
             return True
 
-        metadatas = records.get("metadatas") or []
-        stored_hash = metadatas[0].get("content_hash") if metadatas else None
+        stored_hash = metadata.get("content_hash")
         if stored_hash is None:
             # Entries created before content hashes were introduced are still
             # valid persistent index entries; the build step can hydrate BM25

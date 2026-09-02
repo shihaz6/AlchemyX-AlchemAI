@@ -1,9 +1,15 @@
+import csv
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+try:
+    from ..retrieval.document_metadata import file_metadata
+except ImportError:
+    from src.alchemyx.retrieval.document_metadata import file_metadata
 
-SUPPORTED_EXTENSIONS = ('.txt', '.md', '.docx', '.pdf')
+
+SUPPORTED_EXTENSIONS = ('.txt', '.md', '.docx', '.pdf', '.csv')
 TESSERACT_CMD_ENV = "TESSERACT_CMD"
 WINDOWS_TESSERACT_CMD = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
@@ -14,6 +20,7 @@ class IngestionResult:
     skipped: list[str] = field(default_factory=list)
     failed: dict[str, str] = field(default_factory=dict)
     reused: list[str] = field(default_factory=list)
+    removed: list[str] = field(default_factory=list)
 
 
 def read_txt_md(file_path):
@@ -29,6 +36,30 @@ def read_docx(file_path):
     for para in doc.paragraphs:
         full_text.append(para.text)
     return '\n'.join(full_text)
+
+
+def read_csv(file_path):
+    lines = []
+
+    with open(file_path, newline='', encoding='utf-8-sig') as f:
+        reader = csv.DictReader(f)
+        if reader.fieldnames:
+            for row in reader:
+                fields = [
+                    f"{field}: {row.get(field, '')}"
+                    for field in reader.fieldnames
+                    if row.get(field, '') != ''
+                ]
+                if fields:
+                    lines.append("; ".join(fields))
+            return "\n".join(lines)
+
+        f.seek(0)
+        for row in csv.reader(f):
+            if row:
+                lines.append("; ".join(cell for cell in row if cell))
+
+    return "\n".join(lines)
 
 
 def read_pdf(file_path):
@@ -70,6 +101,8 @@ def extract_text(file_path):
         return read_txt_md(file_path)
     if normalized_path.endswith('.docx'):
         return read_docx(file_path)
+    if normalized_path.endswith('.csv'):
+        return read_csv(file_path)
     if normalized_path.endswith('.pdf'):
         return read_pdf(file_path)
 
@@ -90,7 +123,13 @@ def resolve_corpus_path(corpus_folder_path, base_path=None):
     return base / corpus_path
 
 
-def ingest_corpus(corpus_folder_path, pipeline, bm25_store, base_path=None):
+def ingest_corpus(
+    corpus_folder_path,
+    pipeline,
+    bm25_store,
+    base_path=None,
+    document_registry=None,
+):
     try:
         from alchemyx.retrieval.main import add_document_to_indexes
     except ImportError:
@@ -103,6 +142,7 @@ def ingest_corpus(corpus_folder_path, pipeline, bm25_store, base_path=None):
         raise NotADirectoryError(f"Corpus path is not a folder: {corpus_path}")
 
     result = IngestionResult()
+    indexed_source_docs = set()
 
     for root, _dirs, files in os.walk(corpus_path):
         for file in files:
@@ -119,6 +159,7 @@ def ingest_corpus(corpus_folder_path, pipeline, bm25_store, base_path=None):
 
                 if extracted_text:
                     doc_id = make_doc_id(corpus_path, file_path)
+                    metadata = file_metadata(corpus_path, file_path, doc_id)
                     already_indexed = (
                         hasattr(pipeline, "has_document")
                         and pipeline.has_document(doc_id, extracted_text)
@@ -128,7 +169,11 @@ def ingest_corpus(corpus_folder_path, pipeline, bm25_store, base_path=None):
                         bm25_store=bm25_store,
                         doc_id=doc_id,
                         text=extracted_text,
+                        metadata=metadata,
                     )
+                    if document_registry is not None:
+                        document_registry.replace_document(doc_id, metadata)
+                    indexed_source_docs.add(doc_id)
                     if already_indexed:
                         result.reused.append(doc_id)
                         print(f"↻ Reused existing index: {file}.")
@@ -143,7 +188,32 @@ def ingest_corpus(corpus_folder_path, pipeline, bm25_store, base_path=None):
                 result.failed[make_doc_id(corpus_path, file_path)] = str(e)
                 print(f"❌ Error: {file} can't read file. Reason: {e}")
 
+    if not result.failed:
+        result.removed = prune_indexes(
+            pipeline=pipeline,
+            bm25_store=bm25_store,
+            document_registry=document_registry,
+            source_docs=indexed_source_docs,
+        )
+
     return result
+
+
+def prune_indexes(pipeline, bm25_store, source_docs, document_registry=None):
+    removed = []
+
+    if hasattr(pipeline, "delete_documents_except"):
+        removed.extend(pipeline.delete_documents_except(source_docs))
+    if hasattr(bm25_store, "delete_documents_except"):
+        removed.extend(bm25_store.delete_documents_except(source_docs))
+    if document_registry is not None and hasattr(document_registry, "delete_documents_except"):
+        removed.extend(document_registry.delete_documents_except(source_docs))
+
+    removed = sorted(set(removed))
+    for source_doc in removed:
+        print(f"Removed stale index: {source_doc}")
+
+    return removed
 
 
 def print_ingestion_summary(result):
@@ -152,6 +222,7 @@ def print_ingestion_summary(result):
     print(f"Reused: {len(result.reused)}")
     print(f"Skipped: {len(result.skipped)}")
     print(f"Failed: {len(result.failed)}")
+    print(f"Removed stale: {len(result.removed)}")
 
     if result.failed:
         print("\nFailed files:")

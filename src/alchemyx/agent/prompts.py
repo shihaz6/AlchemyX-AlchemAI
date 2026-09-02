@@ -50,8 +50,21 @@ RULES:
     unsupported entities or facts.
 12. If the evidence is sufficient, do not generate additional search queries.
 13. If important evidence conflicts, mark the evidence as insufficient unless
-    the conflict can be resolved from the supplied evidence.
-14. Do not answer the user's question.
+    the conflict can be resolved from the supplied evidence with a defensible
+    evidence-based reason for preferring one answer.
+14. Conflict detected is not enough to support a "cannot be determined" answer.
+    If the question asks for the true, actual, precise, official, real, or
+    otherwise authoritative value, unresolved contradictions are especially
+    important and should trigger targeted follow-up queries.
+15. If a source points to another record that could resolve the requested fact,
+    such as a register, record, ledger, decree, transcript, archive, codex, or
+    annal, generate a targeted query for that record before marking sufficient.
+16. If the retrieved evidence directly establishes that the requested answer is
+    genuinely unknown, unconfirmed, disputed, or not recorded by the corpus
+    itself, that can be sufficient evidence for an uncertainty answer. Mark
+    sufficient=true only when the evidence establishes genuine uncertainty, cite
+    the evidence IDs, and do not generate more search queries.
+17. Do not answer the user's question.
 
 Return ONLY valid JSON.
 
@@ -78,6 +91,9 @@ If insufficient, use:
 Remember:
 - The ORIGINAL QUESTION is immutable and must be evaluated verbatim.
 - Do not invent facts.
+- A supported "cannot be determined" answer can be sufficient evidence only
+  when the evidence establishes genuine corpus-level uncertainty, not merely
+  because two retrieved sources disagree.
 - Do not answer the question.
 - Judge whether the evidence is enough to answer it.
 """

@@ -1,4 +1,5 @@
 import time
+from time import perf_counter
 
 from chromadb import Documents, EmbeddingFunction, Embeddings
 import voyageai
@@ -15,6 +16,10 @@ except ImportError:
         VOYAGE_MAX_RETRIES,
         VOYAGE_RETRY_BASE_SECONDS,
     )
+try:
+    from .voyage_diagnostics import log_voyage_embedding
+except ImportError:
+    from voyage_diagnostics import log_voyage_embedding
 
 
 class VoyageEmbeddingFunction(EmbeddingFunction):
@@ -35,10 +40,18 @@ class VoyageEmbeddingFunction(EmbeddingFunction):
     def __call__(self, input: Documents) -> Embeddings:
         for attempt in range(self.max_retries + 1):
             try:
+                started = perf_counter()
                 result = self.client.embed(
                     input,
                     model=self.model,
                     input_type=self.input_type,
+                )
+                log_voyage_embedding(
+                    model=self.model,
+                    input_type=self.input_type,
+                    inputs=input,
+                    response=result,
+                    started=started,
                 )
                 return result.embeddings
             except Exception:
