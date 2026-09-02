@@ -49,11 +49,12 @@ Use one configuration file: `.env` in the project root. Create it from the safe 
 copy .env.example .env
 ```
 
-Open `.env` in a text editor and set the values:
+Open `.env` in a text editor and set the required API keys:
 
 ```dotenv
 VOYAGE_API_KEY=your_voyage_key_here
 OPENROUTER_API_KEY=your_openrouter_key_here
+# Optional model overrides; the defaults below are used if omitted.
 VOYAGE_MODEL=voyage-4-lite
 RERANK_MODEL=rerank-2.5
 OPENROUTER_MODEL=openrouter/free
@@ -67,7 +68,7 @@ For a corpus outside the project, use an absolute Windows path, for example:
 ALCHEMYX_CORPUS_PATH=C:\data\my_archive
 ```
 
-`.env` is ignored by Git. Never put real keys in Python files, the README, Streamlit code, or `API-KEY-VOYAGE-AI.txt`; that old text file is ignored and should not be used as configuration. Model changes also belong only in `.env`.
+`.env` is ignored by Git. Never put real keys in Python files, the README, Streamlit code, or `API-KEY-VOYAGE-AI.txt`; that old text file is ignored and should not be used as configuration. Model variables are optional; change them in `.env` when you need to override the defaults in `src\alchemyx\config.py`.
 
 ## Add or Replace Documents
 
