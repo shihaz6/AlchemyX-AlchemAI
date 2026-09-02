@@ -105,10 +105,15 @@ def render_timeline(timeline):
 
 
 def render_conflict_panel(conflict):
-    if not conflict or not conflict.get("detected"):
-        return
+    conflict = conflict or {}
+    with st.expander("Why This Answer", expanded=False):
+        if not conflict.get("detected"):
+            st.write(
+                "The retrieved evidence directly addressed the question, "
+                "and no material conflicting claim was identified."
+            )
+            return
 
-    with st.expander("Why This Answer Won", expanded=True):
         st.markdown("**Competing claims**")
         for claim in conflict.get("competing_claims", []):
             sources = ", ".join(claim.get("sources", [])) or "Retrieved evidence"
@@ -150,6 +155,14 @@ def render_technical_details(result):
         st.caption(f"Research run: {result.get('research_run_id', '')}")
         st.caption(f"Internal stop reason: {result.get('stop_reason', '')}")
         st.caption(f"Chunks retrieved: {result.get('chunks_retrieved', 0)}")
+        if result.get("internal_errors"):
+            st.caption("Internal diagnostics")
+            st.json(result["internal_errors"])
+        if result.get("llm_calls"):
+            st.caption("LLM call counts")
+            st.json(result.get("llm_call_counts", {}))
+            st.caption("LLM calls")
+            st.json(result["llm_calls"])
         technical_sources = result.get("technical_sources", [])
         if technical_sources:
             st.code(
@@ -197,7 +210,7 @@ def render_research_page():
                 st.session_state["research_result"] = result
                 st.session_state["research_question"] = question.strip()
             except Exception as exc:
-                st.exception(exc)
+                st.error("Research could not be completed. Check Technical Details or the application logs.")
                 st.stop()
             finally:
                 st.session_state["research_in_progress"] = False
@@ -245,7 +258,7 @@ def render_archive_page():
                 with st.spinner("Searching archive..."):
                     results = search_archive(query.strip(), top_k=5)
             except Exception as exc:
-                st.exception(exc)
+                st.error("Archive search could not be completed. Check the application logs.")
                 st.stop()
 
             st.subheader("Search Results")
