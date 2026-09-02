@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 from src.alchemyx.retrieval.Retrieval_Result import RetrievalResult
 from src.alchemyx.retrieval import reranker as reranker_module
+from src.alchemyx.retrieval import voyage_diagnostics
 from src.alchemyx.retrieval.reranker import Reranker
 
 
@@ -12,8 +13,9 @@ class FakeRerankItem:
 
 
 class FakeRerankResponse:
-    def __init__(self, results):
+    def __init__(self, results, usage=None):
         self.results = results
+        self.usage = usage
 
 
 class FakeVoyageClient:
@@ -80,3 +82,40 @@ def test_reranker_empty_input_returns_empty_list(monkeypatch):
 
     assert reranker.rerank("question", []) == []
     assert FakeVoyageClient.calls == []
+
+
+def test_reranker_logs_authoritative_usage(monkeypatch):
+    logs = []
+
+    class UsageVoyageClient(FakeVoyageClient):
+        def rerank(self, query, documents, model, top_k):
+            response = super().rerank(query, documents, model, top_k)
+            response.usage = {"total_tokens": 2847}
+            return response
+
+    FakeVoyageClient.calls = []
+    monkeypatch.setattr(reranker_module.voyageai, "Client", UsageVoyageClient)
+    monkeypatch.setattr(voyage_diagnostics, "log", logs.append)
+
+    reranker = Reranker(api_key="test")
+    reranker.rerank("question", make_results(), top_k=2)
+
+    assert "[Voyage Rerank]" in logs
+    assert "model=rerank-2.5" in logs
+    assert "candidates=3" in logs
+    assert "returned=2" in logs
+    assert "tokens=2847" in logs
+    assert not any("tokens_estimate" in entry for entry in logs)
+
+
+def test_reranker_logs_unavailable_usage_when_sdk_usage_is_missing(monkeypatch):
+    logs = []
+
+    FakeVoyageClient.calls = []
+    monkeypatch.setattr(reranker_module.voyageai, "Client", FakeVoyageClient)
+    monkeypatch.setattr(voyage_diagnostics, "log", logs.append)
+
+    reranker = Reranker(api_key="test")
+    reranker.rerank("question", make_results(), top_k=1)
+
+    assert "tokens=unavailable" in logs

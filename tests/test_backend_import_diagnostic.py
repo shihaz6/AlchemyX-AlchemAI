@@ -94,6 +94,8 @@ def test_archive_search_uses_adapter(monkeypatch):
                 "source_doc": "archive.md",
                 "chunk_index": 2,
                 "score": 0.91,
+                "rank_score": 0.91,
+                "score_type": "rank_score",
                 "text": "Archive evidence.",
             }
         ]

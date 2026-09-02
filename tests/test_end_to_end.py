@@ -37,7 +37,10 @@ class FakeAgent:
 class FakeLLMClient:
 
     def ask(self, prompt):
-        return "Caldrin escorted Mira Quen. [caldrin_wiki_chunk2]"
+        return """{
+            "answer": "Caldrin escorted Mira Quen. [caldrin_wiki_chunk2]",
+            "evidence_ids": ["caldrin_wiki_chunk2"]
+        }"""
 
 
 def test_system_ask_returns_answer_citations_and_agent_metadata():
@@ -70,6 +73,7 @@ def test_evaluator_records_metrics_from_system_results():
         {
             "question": "Who did Caldrin escort?",
             "expected_source": "caldrin_wiki",
+            "expected_sources": ["caldrin_wiki"],
             "expected_chunk": "caldrin_wiki_chunk2",
         }
     ]
@@ -79,6 +83,7 @@ def test_evaluator_records_metrics_from_system_results():
 
     assert rows[0]["retrieval_hit"] is True
     assert rows[0]["expected_chunk_rank"] == 1
+    assert rows[0]["source_recall_at_5"] == 1.0
     assert rows[0]["iterations"] == 1
     assert rows[0]["sufficiency_reached"] is True
     assert rows[0]["answer_produced"] is True

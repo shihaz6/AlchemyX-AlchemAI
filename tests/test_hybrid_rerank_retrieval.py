@@ -61,6 +61,32 @@ def test_query_runs_hybrid_search_then_reranker():
     ]
 
 
+def test_adjudication_query_uses_broader_pool_and_prefers_source_diversity():
+    hybrid_search = FakeHybridSearch()
+    hybrid_search.results = [
+        RetrievalResult("a_chunk0", "first", "same.txt", 0, 1.0),
+        RetrievalResult("a_chunk1", "second", "same.txt", 1, 0.9),
+        RetrievalResult("b_chunk0", "third", "other.txt", 0, 0.8),
+    ]
+    reranker = FakeReranker()
+    reranker.results = hybrid_search.results
+    pipeline = HybridRerankRetrievalPipeline(
+        hybrid_search=hybrid_search,
+        reranker=reranker,
+        candidate_k=12,
+        top_k=2,
+        min_relevance_score=0.7,
+    )
+
+    results = pipeline.query_for_adjudication("Where did Mira go?")
+
+    assert hybrid_search.calls == [("Where did Mira go?", 24)]
+    assert reranker.calls == [
+        ("Where did Mira go?", hybrid_search.results, 8, 0.7)
+    ]
+    assert [result.source_doc for result in results[:2]] == ["same.txt", "other.txt"]
+
+
 def test_agent_retrieval_pipeline_requires_built_indexes(monkeypatch):
     class EmptyCollection:
         def count(self):

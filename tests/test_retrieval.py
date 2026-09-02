@@ -130,6 +130,43 @@ def test_retrieval_detects_unchanged_document(monkeypatch, tmp_path):
     assert pipeline.has_document("caldrin_wiki", "Changed text") is False
 
 
+def test_retrieval_reindexes_legacy_chunks_without_metadata_schema(
+    monkeypatch,
+    tmp_path,
+):
+    pipeline = make_pipeline(monkeypatch, tmp_path)
+    text = "Caldrin escorted Mira."
+    pipeline.add_document("caldrin_wiki", text, chunk_size=20, overlap=0)
+
+    pipeline.collection.update(
+        ids=["caldrin_wiki_chunk0"],
+        metadatas=[
+            {
+                "source_doc": "caldrin_wiki",
+                "chunk_index": 0,
+                "content_hash": "legacy",
+            }
+        ],
+    )
+
+    assert pipeline.has_document("caldrin_wiki", text) is False
+
+
+def test_retrieval_delete_documents_except_removes_stale_chroma_sources(
+    monkeypatch,
+    tmp_path,
+):
+    pipeline = make_pipeline(monkeypatch, tmp_path)
+    pipeline.add_document("current.txt", "current document", chunk_size=20, overlap=0)
+    pipeline.add_document("mira_wiki", "stale document", chunk_size=20, overlap=0)
+
+    removed = pipeline.delete_documents_except({"current.txt"})
+    stored = pipeline.collection.get(include=["metadatas"])
+
+    assert removed == ["mira_wiki"]
+    assert stored["ids"] == ["current.txt_chunk0"]
+
+
 def test_add_document_batches_chroma_add_calls(monkeypatch):
     class FakeCollection:
 
@@ -182,3 +219,8 @@ def test_add_document_batches_chroma_add_calls(monkeypatch):
         ["doc_chunk0", "doc_chunk1"],
         ["doc_chunk2"],
     ]
+    assert all(
+        metadata["index_schema_version"] == 5
+        for _documents, _ids, metadatas in fake_client.collection.add_calls
+        for metadata in metadatas
+    )

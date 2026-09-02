@@ -56,6 +56,16 @@ def test_sufficiency_prompt_preserves_question_and_does_not_expand_task():
     assert "plot, themes, motivation" in prompt
 
 
+def test_sufficiency_prompt_treats_supported_uncertainty_as_sufficient():
+    prompt = build_sufficiency_prompt(
+        "What happened to Caldrin after the Night of Falling Bells",
+        [],
+    )
+
+    assert "unknown, unconfirmed, disputed, or not recorded" in prompt
+    assert "uncertainty answer" in prompt
+
+
 def test_sufficiency_checker_accepts_markdown_fenced_json():
     class FencedLLM:
         def ask(self, prompt):
@@ -64,7 +74,48 @@ def test_sufficiency_checker_accepts_markdown_fenced_json():
  "evidence_ids": ["doc_1"], "reason": "Evidence answers the question."}
 ```'''
 
-    result = SufficiencyChecker(FencedLLM()).check("Who wrote this book?", [])
+    documents = [
+        RetrievalResult(
+            id="doc_1",
+            text="The evidence answers the question.",
+            source_doc="fake",
+            chunk_index=0,
+            score=1.0,
+        )
+    ]
+
+    result = SufficiencyChecker(FencedLLM()).check("Who wrote this book?", documents)
 
     assert result.sufficient is True
     assert result.evidence_ids == ["doc_1"]
+
+
+def test_sufficiency_checker_rejects_unretrieved_evidence_ids():
+    class InvalidCitationLLM:
+        def ask(self, prompt):
+            return json.dumps(
+                {
+                    "sufficient": True,
+                    "missing": [],
+                    "search_queries": [],
+                    "evidence_ids": ["mira_wiki_chunk0"],
+                    "reason": "Evidence answers the question.",
+                }
+            )
+
+    documents = [
+        RetrievalResult(
+            id="smugglers/mira_quen.txt_chunk0",
+            text="Mira carried a reliquary.",
+            source_doc="smugglers/mira_quen.txt",
+            chunk_index=0,
+            score=1.0,
+        )
+    ]
+
+    try:
+        SufficiencyChecker(InvalidCitationLLM()).check("What did Mira carry?", documents)
+    except ValueError as exc:
+        assert "not retrieved" in str(exc)
+    else:
+        raise AssertionError("Expected unretrieved evidence ID to be rejected")

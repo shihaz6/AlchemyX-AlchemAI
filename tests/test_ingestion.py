@@ -2,6 +2,7 @@ from src.alchemyx.ingestion.ingestion import (
     IngestionResult,
     ingest_corpus,
     print_ingestion_summary,
+    read_csv,
     read_pdf,
     resolve_corpus_path,
 )
@@ -11,18 +12,48 @@ class FakePipeline:
 
     def __init__(self):
         self.documents = []
+        self.removed_except = None
 
-    def add_document(self, doc_id, text, chunk_size=300, overlap=50):
-        self.documents.append((doc_id, text, chunk_size, overlap))
+    def add_document(
+        self,
+        doc_id,
+        text,
+        chunk_size=300,
+        overlap=50,
+        metadata=None,
+    ):
+        self.documents.append((doc_id, text, chunk_size, overlap, metadata))
+
+    def delete_documents_except(self, source_docs):
+        self.removed_except = set(source_docs)
+        return []
 
 
 class FakeBM25Store:
 
     def __init__(self):
         self.documents = []
+        self.removed_except = None
 
     def add_documents(self, documents):
         self.documents.extend(documents)
+
+    def delete_documents_except(self, source_docs):
+        self.removed_except = set(source_docs)
+        return []
+
+
+class FakeDocumentRegistry:
+    def __init__(self):
+        self.documents = {}
+        self.removed_except = None
+
+    def replace_document(self, source_doc, metadata):
+        self.documents[source_doc] = metadata
+
+    def delete_documents_except(self, source_docs):
+        self.removed_except = set(source_docs)
+        return []
 
 
 def test_ingest_corpus_adds_documents_to_chroma_and_bm25_indexes(tmp_path):
@@ -37,44 +68,132 @@ def test_ingest_corpus_adds_documents_to_chroma_and_bm25_indexes(tmp_path):
 
     pipeline = FakePipeline()
     bm25_store = FakeBM25Store()
+    document_registry = FakeDocumentRegistry()
 
-    result = ingest_corpus(str(corpus), pipeline, bm25_store)
+    result = ingest_corpus(
+        str(corpus),
+        pipeline,
+        bm25_store,
+        document_registry=document_registry,
+    )
 
     assert pipeline.documents == [
         (
             "nested/source.md",
             "one two three four five six seven eight nine ten",
-            30,
-            5,
+            120,
+            20,
+            {
+                "source_doc": "nested/source.md",
+                "file_name": "source.md",
+                "extension": ".md",
+                "relative_path": "nested/source.md",
+                "document_type": "md",
+                "metadata_keywords": "",
+            },
         )
     ]
     assert bm25_store.documents == [
         {
             "id": "nested/source.md_chunk0",
-            "text": "one two three four five six seven eight nine ten",
+            "text": (
+                "FILE: source.md\n"
+                "TYPE: md\n"
+                "EXTENSION: .md\n"
+                "PATH: nested/source.md\n"
+                "SOURCE: nested/source.md\n\n"
+                "one two three four five six seven eight nine ten"
+            ),
+            "content_text": "one two three four five six seven eight nine ten",
+            "metadata_text": (
+                "FILE: source.md\n"
+                "TYPE: md\n"
+                "EXTENSION: .md\n"
+                "PATH: nested/source.md\n"
+                "SOURCE: nested/source.md"
+            ),
             "source_doc": "nested/source.md",
             "chunk_index": 0,
+            "file_name": "source.md",
+            "extension": ".md",
+            "relative_path": "nested/source.md",
+            "document_type": "md",
+            "metadata_keywords": "",
         }
     ]
     assert result.ingested == ["nested/source.md"]
     assert result.skipped == []
     assert result.failed == {}
+    assert result.removed == []
+    assert pipeline.removed_except == {"nested/source.md"}
+    assert bm25_store.removed_except == {"nested/source.md"}
+    assert set(document_registry.documents) == {"nested/source.md"}
+    assert document_registry.removed_except == {"nested/source.md"}
 
 
-def test_ingest_corpus_reports_skipped_unsupported_files(tmp_path):
+def test_ingest_corpus_adds_csv_documents_to_indexes(tmp_path):
     corpus = tmp_path / "corpus"
     corpus.mkdir()
-    (corpus / "notes.csv").write_text("not supported", encoding="utf-8")
+    (corpus / "notes.csv").write_text(
+        "name,role\nCaldrin Vale,knight\nMira Quen,smuggler\n",
+        encoding="utf-8",
+    )
 
     pipeline = FakePipeline()
     bm25_store = FakeBM25Store()
 
     result = ingest_corpus(str(corpus), pipeline, bm25_store)
 
-    assert pipeline.documents == []
-    assert bm25_store.documents == []
-    assert result.ingested == []
-    assert result.skipped == ["notes.csv"]
+    expected_text = (
+        "name: Caldrin Vale; role: knight\n"
+        "name: Mira Quen; role: smuggler"
+    )
+    assert pipeline.documents == [
+        (
+            "notes.csv",
+            expected_text,
+            120,
+            20,
+            {
+                "source_doc": "notes.csv",
+                "file_name": "notes.csv",
+                "extension": ".csv",
+                "relative_path": "notes.csv",
+                "document_type": "csv",
+                "metadata_keywords": "",
+            },
+        )
+    ]
+    assert bm25_store.documents == [
+        {
+            "id": "notes.csv_chunk0",
+            "text": (
+                "FILE: notes.csv\n"
+                "TYPE: csv\n"
+                "EXTENSION: .csv\n"
+                "PATH: notes.csv\n"
+                "SOURCE: notes.csv\n\n"
+                f"{expected_text.replace('\n', ' ')}"
+            ),
+            "content_text": expected_text.replace("\n", " "),
+            "metadata_text": (
+                "FILE: notes.csv\n"
+                "TYPE: csv\n"
+                "EXTENSION: .csv\n"
+                "PATH: notes.csv\n"
+                "SOURCE: notes.csv"
+            ),
+            "source_doc": "notes.csv",
+            "chunk_index": 0,
+            "file_name": "notes.csv",
+            "extension": ".csv",
+            "relative_path": "notes.csv",
+            "document_type": "csv",
+            "metadata_keywords": "",
+        }
+    ]
+    assert result.ingested == ["notes.csv"]
+    assert result.skipped == []
     assert result.failed == {}
 
 
@@ -111,8 +230,54 @@ def test_ingest_corpus_continues_after_file_failure(tmp_path):
     assert result.skipped == []
     assert "broken.txt" in result.failed
     assert pipeline.documents == [
-        ("valid.md", "valid document", 30, 5)
+        (
+            "valid.md",
+            "valid document",
+            120,
+            20,
+            {
+                "source_doc": "valid.md",
+                "file_name": "valid.md",
+                "extension": ".md",
+                "relative_path": "valid.md",
+                "document_type": "md",
+                "metadata_keywords": "",
+            },
+        )
     ]
+    assert pipeline.removed_except is None
+    assert bm25_store.removed_except is None
+
+
+def test_ingest_corpus_reports_removed_stale_indexes(tmp_path):
+    class StalePipeline(FakePipeline):
+        def delete_documents_except(self, source_docs):
+            super().delete_documents_except(source_docs)
+            return ["mira_wiki"]
+
+    class StaleBM25Store(FakeBM25Store):
+        def delete_documents_except(self, source_docs):
+            super().delete_documents_except(source_docs)
+            return ["mira_wiki"]
+
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    (corpus / "current.txt").write_text("current document", encoding="utf-8")
+
+    pipeline = StalePipeline()
+    bm25_store = StaleBM25Store()
+    document_registry = FakeDocumentRegistry()
+    document_registry.documents["mira_wiki"] = {"source_doc": "mira_wiki"}
+
+    result = ingest_corpus(
+        str(corpus),
+        pipeline,
+        bm25_store,
+        document_registry=document_registry,
+    )
+
+    assert result.ingested == ["current.txt"]
+    assert result.removed == ["mira_wiki"]
 
 
 def test_read_pdf_uses_tesseract_env_var_for_ocr(monkeypatch):
@@ -168,6 +333,13 @@ def test_read_pdf_uses_tesseract_env_var_for_ocr(monkeypatch):
         FakePytesseractModule.pytesseract.tesseract_cmd
         == "/opt/tesseract/bin/tesseract"
     )
+
+
+def test_read_csv_with_headers_extracts_rows(tmp_path):
+    csv_path = tmp_path / "raw.csv"
+    csv_path.write_text("alpha,beta\none,two\n", encoding="utf-8")
+
+    assert read_csv(csv_path) == "alpha: one; beta: two"
 
 
 def test_print_ingestion_summary_reports_failures(capsys):
