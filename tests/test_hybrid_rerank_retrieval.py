@@ -1,5 +1,6 @@
 from src.alchemyx.agent.hybrid_rerank_retrieval import HybridRerankRetrievalPipeline
 from src.alchemyx.retrieval.Retrieval_Result import RetrievalResult
+from src.alchemyx.retrieval import main as retrieval_main
 from src.alchemyx.retrieval.main import create_agent_retrieval_pipeline
 
 
@@ -60,12 +61,26 @@ def test_query_runs_hybrid_search_then_reranker():
     ]
 
 
-def test_agent_retrieval_pipeline_requires_corpus_path(monkeypatch):
-    monkeypatch.setenv("ALCHEMYX_CORPUS_PATH", "")
+def test_agent_retrieval_pipeline_requires_built_indexes(monkeypatch):
+    class EmptyCollection:
+        def count(self):
+            return 0
+
+    class EmptyPipeline:
+        collection = EmptyCollection()
+
+    class EmptyBM25:
+        documents = []
+
+    monkeypatch.setattr(
+        retrieval_main,
+        "create_retrieval_stack",
+        lambda api_key=None: (EmptyPipeline(), EmptyBM25(), None, None),
+    )
 
     try:
         create_agent_retrieval_pipeline(api_key="test-key")
     except RuntimeError as exc:
-        assert "ALCHEMYX_CORPUS_PATH is missing" in str(exc)
+        assert "build_indexes.py" in str(exc)
     else:
         raise AssertionError("Expected missing corpus path to raise RuntimeError")

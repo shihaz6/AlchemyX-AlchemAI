@@ -45,3 +45,22 @@ def test_replace_documents_removes_stale_source_doc_chunks():
     ]
     assert store.search("old coolant", top_k=1)[0].id != "doc_a_chunk0"
     assert store.search("reliquary", top_k=1)[0].id == "doc_a_chunk0"
+
+
+def test_bm25_documents_persist_and_reload(tmp_path):
+    path = tmp_path / "bm25.json"
+    store = BM25Store(persist_path=path)
+    store.add_documents(
+        [
+            {
+                "id": "doc_chunk0",
+                "text": "persistent archive evidence",
+                "source_doc": "doc",
+                "chunk_index": 0,
+            }
+        ]
+    )
+
+    reloaded = BM25Store(persist_path=path)
+
+    assert reloaded.search("archive", top_k=1)[0].id == "doc_chunk0"

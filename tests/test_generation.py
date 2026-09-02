@@ -65,6 +65,19 @@ def test_build_answer_prompt_mentions_incomplete_evidence_instruction():
     assert "Do not invent facts" in prompt
 
 
+def test_answer_generator_does_not_call_llm_without_evidence():
+    llm_client = FakeLLMClient()
+
+    result = AnswerGenerator(llm_client).generate(
+        question="Question?",
+        documents=[],
+    )
+
+    assert result.evidence_ids == []
+    assert "could not find sufficient evidence" in result.answer
+    assert llm_client.prompts == []
+
+
 def test_build_and_format_citations():
     documents = make_documents() + make_documents()
 

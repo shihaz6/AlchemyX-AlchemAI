@@ -119,6 +119,17 @@ def test_retrieval_persistent_chroma_index(monkeypatch, tmp_path):
     assert results[0].id == "caldrin_wiki_chunk0"
 
 
+def test_retrieval_detects_unchanged_document(monkeypatch, tmp_path):
+    pipeline = make_pipeline(monkeypatch, tmp_path)
+    text = "Caldrin escorted Mira."
+
+    assert pipeline.has_document("caldrin_wiki", text) is False
+    pipeline.add_document("caldrin_wiki", text, chunk_size=20, overlap=0)
+
+    assert pipeline.has_document("caldrin_wiki", text) is True
+    assert pipeline.has_document("caldrin_wiki", "Changed text") is False
+
+
 def test_add_document_batches_chroma_add_calls(monkeypatch):
     class FakeCollection:
 
