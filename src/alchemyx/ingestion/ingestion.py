@@ -4,14 +4,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 try:
+    from ..config import TESSERACT_CMD
     from ..retrieval.document_metadata import file_metadata
 except ImportError:
+    from src.alchemyx.config import TESSERACT_CMD
     from src.alchemyx.retrieval.document_metadata import file_metadata
 
 
 SUPPORTED_EXTENSIONS = ('.txt', '.md', '.docx', '.pdf', '.csv')
-TESSERACT_CMD_ENV = "TESSERACT_CMD"
-WINDOWS_TESSERACT_CMD = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
 
 @dataclass
@@ -71,11 +71,8 @@ def read_pdf(file_path):
     except ImportError:
         import fitz as pymupdf
 
-    tesseract_cmd = os.getenv(TESSERACT_CMD_ENV)
-    if tesseract_cmd:
-        pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
-    elif os.name == "nt":
-        pytesseract.pytesseract.tesseract_cmd = WINDOWS_TESSERACT_CMD
+    if os.name == "nt" and TESSERACT_CMD:
+        pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD
 
     text = ""
 
@@ -238,17 +235,17 @@ if __name__ == "__main__":
 
     try:
         from dotenv import find_dotenv, load_dotenv
+        from alchemyx.config import DEFAULT_CORPUS_PATH
         from alchemyx.retrieval.main import create_retrieval_stack
     except ImportError:
         from dotenv import find_dotenv, load_dotenv
+        from src.alchemyx.config import DEFAULT_CORPUS_PATH
         from src.alchemyx.retrieval.main import create_retrieval_stack
 
     dotenv_path = find_dotenv()
     load_dotenv(dotenv_path)
     project_root = Path(dotenv_path).parent if dotenv_path else project_root
-    my_corpus_folder = os.getenv("ALCHEMYX_CORPUS_PATH")
-    if not my_corpus_folder:
-        raise RuntimeError("ALCHEMYX_CORPUS_PATH is missing from .env")
+    my_corpus_folder = DEFAULT_CORPUS_PATH
 
     my_corpus_folder = resolve_corpus_path(my_corpus_folder, project_root)
     pipeline, bm25_store, _hybrid_search, _reranker = create_retrieval_stack()

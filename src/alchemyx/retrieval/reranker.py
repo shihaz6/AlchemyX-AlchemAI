@@ -35,6 +35,8 @@ class Reranker:
         max_retries=VOYAGE_MAX_RETRIES,
         retry_base_seconds=VOYAGE_RETRY_BASE_SECONDS,
     ):
+        if not RERANK_MODEL:
+            raise ValueError("RERANK_MODEL is not set in config.py")
         self.client = voyageai.Client(api_key=api_key)
         self.min_relevance_score = min_relevance_score
         self.max_retries = max_retries

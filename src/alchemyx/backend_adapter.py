@@ -1,5 +1,6 @@
-"""Streamlit-facing adapter for the AlchemyX backend."""
+"""Streamlit-facing adapter for the AlchemAI backend."""
 
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 import re
@@ -56,6 +57,88 @@ def run_research(question: str) -> dict:
         "excluded_sources": excluded_sources,
         "technical_sources": build_technical_sources(documents, citations),
     }
+
+
+@dataclass(frozen=True)
+class ConversationTurn:
+    question: str
+    effective_question: str
+    answer: str
+    research_run_id: str
+
+
+def run_conversation_turn(question: str, history=None) -> dict:
+    """Run one research turn, expanding obvious follow-ups with prior context."""
+    clean_question = str(question or "").strip()
+    effective_question = contextualize_question(clean_question, history or [])
+    result = run_research(effective_question)
+    result["question"] = clean_question
+    result["effective_question"] = effective_question
+    result["used_conversation_context"] = effective_question != clean_question
+    return result
+
+
+def contextualize_question(question: str, history) -> str:
+    if not question or not is_contextual_followup(question) or not history:
+        return question
+
+    previous = last_conversation_turn(history)
+    if previous is None:
+        return question
+
+    previous_question = previous.question
+    previous_answer = previous.answer
+    if not previous_question and not previous_answer:
+        return question
+
+    context_parts = []
+    if previous_question:
+        context_parts.append(f"Previous question: {previous_question}")
+    if previous_answer:
+        context_parts.append(f"Previous answer: {previous_answer[:700]}")
+    context_parts.append(f"Follow-up question: {question}")
+    return "\n".join(context_parts)
+
+
+def is_contextual_followup(question: str) -> bool:
+    text = str(question or "").strip().lower()
+    if not text:
+        return False
+
+    followup_prefixes = (
+        "what about",
+        "how about",
+        "and what about",
+        "also what about",
+        "give sources for that",
+        "give me sources for that",
+        "show sources for that",
+        "cite that",
+        "source that",
+        "explain that",
+        "why is that",
+        "why was that",
+        "summarize that",
+    )
+    return text.startswith(followup_prefixes)
+
+
+def last_conversation_turn(history) -> ConversationTurn | None:
+    for item in reversed(list(history or [])):
+        if not isinstance(item, dict):
+            continue
+        question = str(item.get("question") or item.get("effective_question") or "").strip()
+        effective_question = str(item.get("effective_question") or question).strip()
+        answer = str(item.get("clean_answer") or item.get("answer") or "").strip()
+        research_run_id = str(item.get("research_run_id") or "").strip()
+        if question or answer:
+            return ConversationTurn(
+                question=question,
+                effective_question=effective_question,
+                answer=answer,
+                research_run_id=research_run_id,
+            )
+    return None
 
 
 def search_archive(query: str, top_k: int = 5) -> list[dict]:
@@ -139,9 +222,11 @@ def build_sources(documents, citations, sufficiency_result=None, answer_evidence
             family_id,
             {
                 "source_family_id": family_id,
+                "source_number": 0,
                 "title": readable_source_label(source_name),
                 "document_type": readable_document_type(source_name),
                 "formats": [],
+                "supports": [],
                 "claim": "",
                 "role": "supporting",
                 "authority_assessment": "Available evidence",
@@ -223,16 +308,22 @@ def build_sources(documents, citations, sufficiency_result=None, answer_evidence
                 source["reason"] = "Supports a competing claim considered during adjudication."
         source["formats"].sort()
         source["chunk_numbers"].sort()
+        source["supports"] = [_reader_support_label(source)]
         source.pop("usable_chunk_ids", None)
         source.pop("excluded_chunk_ids", None)
 
-    return sorted(
-        grouped.values(),
-        key=lambda source: (
-            0 if source["role"] == "selected" else 1 if source["role"] == "conflicting" else 2,
-            source["title"].lower(),
-        ),
-    )
+    sorted_sources = sorted(grouped.values(), key=_source_sort_key)
+    visible_index = 1
+    for source in sorted_sources:
+        if source.get("visibility") != "evidence":
+            continue
+        source["source_number"] = visible_index
+        visible_index += 1
+    for source in sorted_sources:
+        if source.get("visibility") == "evidence":
+            continue
+        source["source_number"] = 0
+    return sorted_sources
 
 
 def _document_is_usable(document, claim=""):
@@ -395,35 +486,57 @@ def build_timings(result):
 
 def clean_answer(answer, sources=None):
     cleaned = str(answer or "")
-    chunk_label_by_id = {}
+    source_number_by_chunk_id = {}
     for source in sources or []:
-        details_by_id = {
-            detail.get("id"): detail
-            for detail in source.get("technical_details", [])
-        }
+        source_number = source.get("source_number")
+        if not source_number:
+            continue
         for chunk_id in source.get("chunk_ids", []):
-            detail = details_by_id.get(chunk_id, {})
-            document_type = detail.get("source_doc", "").rsplit(".", 1)[-1].upper()
-            page_number = detail.get("page_number")
-            location = f"page {page_number}" if page_number is not None else f"chunk {detail.get('chunk_index', '?')}"
-            suffix = f"{document_type}, {location}" if document_type else location
-            chunk_label_by_id[chunk_id] = f"{source.get('title', chunk_id)} ({suffix})"
+            source_number_by_chunk_id[chunk_id] = source_number
 
     def replace_ids(match):
         ids = [part.strip() for part in match.group(1).split(",")]
-        labels = []
+        source_numbers = []
         for evidence_id in ids:
-            label = chunk_label_by_id.get(evidence_id)
-            if label and label not in labels:
-                labels.append(label)
-        if not labels:
+            source_number = source_number_by_chunk_id.get(evidence_id)
+            if source_number and source_number not in source_numbers:
+                source_numbers.append(source_number)
+        if not source_numbers:
             return ""
-        return "[" + "; ".join(labels[:3]) + "]"
+        return "[" + ", ".join(str(number) for number in source_numbers[:3]) + "]"
 
     cleaned = re.sub(r"\[([A-Za-z0-9_./ ·,-]+_chunk\d+(?:\s*,\s*[A-Za-z0-9_./ ·,-]+_chunk\d+)*)\]", replace_ids, cleaned)
     cleaned = re.sub(r"\s+\n", "\n", cleaned)
     cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
     return cleaned.strip()
+
+
+def _reader_support_label(source):
+    claim = str(source.get("claim") or "").strip()
+    if claim:
+        return f"Supports: {claim}"
+    role = str(source.get("role") or "")
+    if role == "selected / resolving":
+        return "Supports the resolved answer"
+    if role == "conflicting":
+        return "Shows a competing account"
+    if source.get("visibility") == "context":
+        return "Provides related context"
+    return "Supports the answer"
+
+
+def _source_sort_key(source):
+    role_rank = {
+        "selected / resolving": 0,
+        "conflicting": 1,
+        "supporting": 2,
+    }.get(source.get("role"), 3)
+    visibility_rank = {
+        "evidence": 0,
+        "context": 1,
+        "excluded": 2,
+    }.get(source.get("visibility"), 3)
+    return (visibility_rank, role_rank, source.get("title", "").lower())
 
 
 def readable_source_label(source_doc):

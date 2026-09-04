@@ -12,15 +12,9 @@ class OpenRouterClient:
 
     def __init__(self):
 
-        # Environment overrides remain useful for tests and process-level deployment
-        # configuration; the project-root .env remains the canonical local source.
         self.api_key = os.getenv("OPENROUTER_API_KEY") or OPENROUTER_API_KEY
-        self.model = os.getenv("OPENROUTER_MODEL") or OPENROUTER_MODEL
-        fallback_models = os.getenv(
-            "OPENROUTER_FALLBACK_MODELS",
-            OPENROUTER_FALLBACK_MODELS,
-        )
-        self.fallback_models = _parse_fallback_models(fallback_models)
+        self.model = OPENROUTER_MODEL
+        self.fallback_models = _parse_fallback_models(OPENROUTER_FALLBACK_MODELS)
 
         if not self.api_key:
             raise ValueError(
@@ -29,7 +23,7 @@ class OpenRouterClient:
 
         if not self.model:
             raise ValueError(
-                "OPENROUTER_MODEL is not set in .env"
+                "OPENROUTER_MODEL is not set in config.py"
             )
 
         self.url = "https://openrouter.ai/api/v1/chat/completions"
@@ -67,7 +61,7 @@ class OpenRouterClient:
                 return self._parse_completion(response)
             except RuntimeError as exc:
                 errors.append(str(exc))
-                if model != "openrouter/free":
+                if model != self._model_sequence()[-1]:
                     continue
                 raise
 
@@ -136,7 +130,7 @@ class OpenRouterClient:
         return content
 
     def _model_sequence(self):
-        models = [self.model, *self.fallback_models, "openrouter/free"]
+        models = [self.model, *self.fallback_models]
         sequence = []
         for model in models:
             if model and model not in sequence:

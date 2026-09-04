@@ -31,6 +31,8 @@ class VoyageEmbeddingFunction(EmbeddingFunction):
         max_retries=VOYAGE_MAX_RETRIES,
         retry_base_seconds=VOYAGE_RETRY_BASE_SECONDS,
     ):
+        if not model:
+            raise ValueError("VOYAGE_MODEL is not set in config.py")
         self.client = voyageai.Client(api_key=api_key)
         self.model = model
         self.input_type = input_type
