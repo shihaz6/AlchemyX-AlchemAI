@@ -1,4 +1,4 @@
-"""Minimal Streamlit frontend for AlchemyX."""
+"""Minimal Streamlit frontend for AlchemAI."""
 
 import json
 import sys
@@ -11,7 +11,7 @@ ADAPTER_ROOT = SRC_ROOT / "alchemyx"
 sys.path.insert(0, str(ADAPTER_ROOT))
 sys.path.insert(0, str(SRC_ROOT))
 
-from backend_adapter import run_research, search_archive
+from backend_adapter import run_conversation_turn, search_archive
 
 
 st.set_page_config(page_title="AlchemAI", page_icon="A", layout="wide")
@@ -28,50 +28,53 @@ def format_seconds(value):
 
 
 def render_sources(sources):
-    with st.expander("Evidence & Sources", expanded=False):
-        if not sources:
-            st.info("No sources were retrieved.")
-            return
+    st.subheader("Sources")
+    if not sources:
+        st.info("No sources were retrieved.")
+        return
 
-        for source in sources:
-            role = source.get("role", "supporting").replace("_", " ").title()
-            title = source.get("title", "Unknown document")
-            st.markdown(f"**{title}**")
-            cols = st.columns([1, 1, 1, 1])
-            cols[0].caption(f"Type: {source.get('document_type', 'Document')}")
-            cols[1].caption(f"Role: {role}")
-            cols[2].caption(f"Authority: {source.get('authority_assessment', 'Available evidence')}")
-            cols[3].caption(f"Chunks: {source.get('chunks', 0)}")
-            st.caption(f"Entity match: {source.get('entity_match', 'Unknown')}")
-            formats = ", ".join(source.get("formats", [])) or "Unknown"
-            st.caption(f"Formats: {formats}")
-            if source.get("claim"):
-                st.caption(f"Claim: {source['claim']}")
-            if source.get("authority_summary"):
-                st.write(source["authority_summary"])
-            elif source.get("reason"):
-                st.write(source["reason"])
-            if source.get("excerpt"):
-                st.caption(source["excerpt"])
-            st.divider()
+    for source in sources:
+        source_number = source.get("source_number", "?")
+        title = source.get("title", "Unknown document")
+        formats = ", ".join(source.get("formats", [])) or source.get("document_type", "Document")
+        st.markdown(f"**[{source_number}] {title}**")
+        st.caption(formats)
+        for support in source.get("supports", []):
+            st.write(support)
+        if source.get("authority_summary"):
+            st.caption(source["authority_summary"])
+        elif source.get("reason"):
+            st.caption(source["reason"])
+        excerpt = short_excerpt(source.get("excerpt", ""))
+        if excerpt:
+            st.caption(f"Excerpt: {excerpt}")
+        st.divider()
 
 
 def render_context_sources(result):
     related_sources = result.get("related_sources", [])
     excluded_sources = result.get("excluded_sources", [])
     if related_sources:
-        with st.expander("Related But Not Used", expanded=False):
+        with st.expander("Related sources", expanded=False):
             for source in related_sources:
                 st.markdown(f"**{source.get('title', 'Unknown document')}**")
-                st.caption(f"Entity match: {source.get('entity_match', 'Related')}")
+                for support in source.get("supports", []):
+                    st.caption(support)
                 if source.get("excerpt"):
-                    st.caption(source["excerpt"])
+                    st.caption(short_excerpt(source["excerpt"]))
     if excluded_sources:
-        with st.expander("Excluded Evidence", expanded=False):
+        with st.expander("Excluded evidence", expanded=False):
             st.caption("These retrieved chunks were not used as direct evidence.")
             for source in excluded_sources:
                 st.markdown(f"**{source.get('title', 'Unknown document')}**")
                 st.caption(f"Entity match: {source.get('entity_match', 'Excluded')}")
+
+
+def short_excerpt(text, limit=260):
+    text = " ".join(str(text or "").split())
+    if len(text) <= limit:
+        return text
+    return text[: limit - 3].rstrip() + "..."
 
 
 def render_timeline(timeline):
@@ -182,48 +185,7 @@ def render_technical_details(result):
             )
 
 
-def render_research_page():
-    st.title("AlchemAI")
-    st.write("Agentic Research Assistant by AlchemyX")
-
-    with st.form("research_form", clear_on_submit=False):
-        question = st.text_area(
-            "Question",
-            placeholder="Ask a question about your indexed archive...",
-            height=120,
-        )
-        submitted = st.form_submit_button(
-            "Ask question",
-            type="primary",
-            disabled=st.session_state.get("research_in_progress", False),
-        )
-
-    if submitted:
-        if not question.strip():
-            st.session_state.pop("research_result", None)
-            st.warning("Please enter a question before submitting.")
-        else:
-            try:
-                st.session_state["research_in_progress"] = True
-                with st.spinner("Researching..."):
-                    result = run_research(question.strip())
-                st.session_state["research_result"] = result
-                st.session_state["research_question"] = question.strip()
-            except Exception as exc:
-                st.error("Research could not be completed. Check Technical Details or the application logs.")
-                st.stop()
-            finally:
-                st.session_state["research_in_progress"] = False
-
-
-    result = st.session_state.get("research_result")
-    if not result:
-        return
-
-    st.divider()
-    st.subheader("Final Answer")
-    st.write(result.get("clean_answer") or result.get("answer", "No answer was returned."))
-
+def render_result_metrics(result):
     conflict = result.get("conflict", {})
     timings = result.get("timings", {})
     metrics = st.columns(6)
@@ -234,12 +196,100 @@ def render_research_page():
     metrics[4].metric("Total Time", format_seconds(timings.get("end_to_end")))
     metrics[5].metric("Stop Reason", result.get("stop_reason_label", "Unknown"))
 
+
+def render_research_details(result):
+    render_result_metrics(result)
     render_timeline(result.get("timeline", []))
-    render_conflict_panel(conflict)
+    render_conflict_panel(result.get("conflict", {}))
     render_sources(result.get("sources", []))
     render_context_sources(result)
-    render_performance(timings)
+    render_performance(result.get("timings", {}))
     render_technical_details(result)
+
+
+def render_conversation_history(turns):
+    if not turns:
+        return
+
+    st.divider()
+    st.subheader("Research Session")
+    latest_index = len(turns) - 1
+    for index, turn in enumerate(turns):
+        with st.container(border=True):
+            st.markdown(f"**Question {index + 1}**")
+            st.write(turn.get("question", ""))
+            if turn.get("used_conversation_context"):
+                st.caption("Follow-up resolved with previous turn context.")
+            st.markdown("**Answer**")
+            st.write(turn.get("clean_answer") or turn.get("answer", "No answer was returned."))
+            if index != latest_index:
+                st.caption(
+                    f"Run {turn.get('research_run_id', '')} - "
+                    f"{turn.get('stop_reason_label', 'Unknown')}"
+                )
+
+    st.subheader("Latest Run Details")
+    render_research_details(turns[-1])
+
+
+def render_research_page():
+    st.title("AlchemAI")
+    st.write("Agentic Research Assistant by AlchemyX")
+
+    if "research_turns" not in st.session_state:
+        st.session_state["research_turns"] = []
+
+    if st.session_state["research_turns"]:
+        if st.button(
+            "New research session",
+            disabled=st.session_state.get("research_in_progress", False),
+        ):
+            st.session_state["research_turns"] = []
+            st.session_state.pop("research_result", None)
+            st.session_state.pop("research_question", None)
+            st.session_state.pop("pending_question", None)
+            st.session_state["question_input"] = ""
+
+    with st.form("research_form", clear_on_submit=True):
+        question = st.text_area(
+            "Question",
+            placeholder="Ask a question or a follow-up about your indexed archive...",
+            height=120,
+            key="question_input",
+        )
+        submitted = st.form_submit_button(
+            "Ask question",
+            type="primary",
+            disabled=st.session_state.get("research_in_progress", False),
+        )
+
+    if submitted:
+        if not question.strip():
+            st.session_state.pop("research_result", None)
+            st.session_state.pop("pending_question", None)
+            st.warning("Please enter a question before submitting.")
+        else:
+            try:
+                st.session_state["research_in_progress"] = True
+                st.session_state["pending_question"] = question.strip()
+                with st.spinner("Researching..."):
+                    st.markdown("**Question**")
+                    st.write(st.session_state["pending_question"])
+                    result = run_conversation_turn(
+                        question.strip(),
+                        st.session_state["research_turns"],
+                    )
+                st.session_state["research_result"] = result
+                st.session_state["research_question"] = question.strip()
+                st.session_state["research_turns"].append(result)
+                st.session_state.pop("pending_question", None)
+            except Exception as exc:
+                st.error("Research could not be completed. Check Technical Details or the application logs.")
+                st.stop()
+            finally:
+                st.session_state["research_in_progress"] = False
+
+    render_conversation_history(st.session_state["research_turns"])
 
 
 def render_archive_page():

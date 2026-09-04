@@ -1,6 +1,6 @@
-# AlchemyX
+# AlchemAI
 
-AlchemyX is a Streamlit research assistant for searching a local document corpus with hybrid retrieval (Chroma plus BM25), reranking evidence, checking sufficiency, resolving conflicts, and generating cited answers.
+AlchemAI is a Streamlit research assistant for searching a local document corpus with hybrid retrieval (Chroma plus BM25), reranking evidence, checking sufficiency, resolving conflicts, and generating cited answers.
 
 This guide starts from a Windows PC with no project libraries installed.
 
@@ -27,23 +27,23 @@ Download Python from [python.org](https://www.python.org/downloads/) and enable 
 python --version
 ```
 
-## Install AlchemyX
+## Install AlchemAI
 
 Open Command Prompt in the project folder:
 
 ```bat
-cd /d "C:\path\to\AlchemyX"
+cd /d "C:\path\to\AlchemAI"
 python -m venv .venv
 .venv\Scripts\activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
-The virtual environment keeps AlchemyX's libraries separate from other Python projects. Activate it again whenever you open a new terminal.
+The virtual environment keeps AlchemAI's libraries separate from other Python projects. Activate it again whenever you open a new terminal.
 
-## Configure Keys, Models, and Corpus
+## Configure API Keys and Corpus
 
-Use one configuration file: `.env` in the project root. Create it from the safe template:
+Use `.env` in the project root for API keys and the corpus path. Create it from the safe template:
 
 ```bat
 copy .env.example .env
@@ -54,11 +54,6 @@ Open `.env` in a text editor and set the required API keys:
 ```dotenv
 VOYAGE_API_KEY=your_voyage_key_here
 OPENROUTER_API_KEY=your_openrouter_key_here
-# Optional model overrides; the defaults below are used if omitted.
-VOYAGE_MODEL=voyage-4-lite
-RERANK_MODEL=rerank-2.5
-OPENROUTER_MODEL=minimax/minimax-m3:free
-OPENROUTER_FALLBACK_MODELS=
 ALCHEMYX_CORPUS_PATH=Archive_test
 ```
 
@@ -68,7 +63,9 @@ For a corpus outside the project, use an absolute Windows path, for example:
 ALCHEMYX_CORPUS_PATH=C:\data\my_archive
 ```
 
-`.env` is ignored by Git. Never put real keys in Python files, the README, Streamlit code, or `API-KEY-VOYAGE-AI.txt`; that old text file is ignored and should not be used as configuration. Model variables are optional; change them in `.env` when you need to override the defaults in `src\alchemyx\config.py`.
+Model choices and optional OCR tool paths are configured in `src\alchemyx\config.py`, not `.env`.
+
+`.env` is ignored by Git. Never put real keys in Python files, the README, Streamlit code, or `API-KEY-VOYAGE-AI.txt`; that old text file is ignored and should not be used as configuration.
 
 ## Add or Replace Documents
 
@@ -111,15 +108,15 @@ python -m compileall src app tests
 - `scripts\build_indexes.py` - corpus indexing command
 - `requirements.txt` - Python packages required by the application
 - `.env.example` - safe configuration template
-- `.env` - private keys, model selections, and corpus path
+- `.env` - private API keys and corpus path
 - `data` - local data and generated index storage, where applicable
 
 ## Common Problems
 
 **Missing API key:** confirm the file is named exactly `.env`, is in the project root, and contains both provider keys. Restart the Streamlit process after changing it.
 
-**OpenRouter model unavailable:** choose a model available to your OpenRouter account by changing `OPENROUTER_MODEL` in `.env`. Do not change production code for a provider model selection.
+**OpenRouter model unavailable:** choose a model available to your OpenRouter account by changing `OPENROUTER_MODEL` in `src\alchemyx\config.py`.
 
-**Scanned PDF extraction fails:** install Tesseract and Poppler. If Tesseract is not installed at its standard Windows location, set `TESSERACT_CMD` in `.env`.
+**Scanned PDF extraction fails:** install Tesseract and Poppler. If Tesseract is not installed at its standard Windows location, set `TESSERACT_CMD` in `src\alchemyx\config.py`.
 
-**No useful evidence:** confirm `ALCHEMYX_CORPUS_PATH` points to the intended directory, then rebuild the indexes.
+**No useful evidence:** confirm `ALCHEMYX_CORPUS_PATH` in `.env` points to the intended directory, then rebuild the indexes.
