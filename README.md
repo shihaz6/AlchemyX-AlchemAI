@@ -57,7 +57,7 @@ OPENROUTER_API_KEY=your_openrouter_key_here
 # Optional model overrides; the defaults below are used if omitted.
 VOYAGE_MODEL=voyage-4-lite
 RERANK_MODEL=rerank-2.5
-OPENROUTER_MODEL=openrouter/free
+OPENROUTER_MODEL=minimax/minimax-m3:free
 OPENROUTER_FALLBACK_MODELS=
 ALCHEMYX_CORPUS_PATH=Archive_test
 ```
