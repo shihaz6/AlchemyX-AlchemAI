@@ -16,7 +16,7 @@ Below, each team member's usage is described with specific examples from their l
 
 ## Shihaz Shaheem — Retrieval & Re-query
 
-**AI tools used:** Claude, ChatGPT, Codex
+**AI tools used:** Claude, ChatGPT
 
 **Specific examples of AI-assisted work:**
 - Used Claude in a step-by-step, Socratic format to build the retrieval pipeline (chunking, Voyage embeddings, ChromaDB integration) — asked to trace and reason through bugs before being given fixes, rather than being handed working code.
