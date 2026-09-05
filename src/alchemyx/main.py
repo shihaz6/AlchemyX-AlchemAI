@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from dataclasses import dataclass
 from time import perf_counter
 from uuid import uuid4
 
@@ -17,7 +18,7 @@ class AlchemyXSystem:
     agent: AgentLoop
     answer_generator: AnswerGenerator
 
-    def ask(self, question):
+    def ask(self, question, progress=None):
         research_run_id = uuid4().hex[:6]
         token = set_run_id(research_run_id)
         try:
@@ -27,12 +28,14 @@ class AlchemyXSystem:
                 llm_client = getattr(self.answer_generator, "llm_client", None)
             if hasattr(llm_client, "call_log"):
                 llm_client.call_log.clear()
+            _notify(progress, "Starting the research loop.")
             # AgentLoop generates its own ID when called through older/custom
             # implementations; use the returned ID when it provides one.
-            agent_result = self.agent.run(question)
+            agent_result = self.agent.run(question, progress=progress)
             research_run_id = agent_result.get("research_run_id", research_run_id)
             reset_run_id(token)
             token = set_run_id(research_run_id)
+            _notify(progress, "Generating the final answer from selected evidence.")
             started = perf_counter()
             generated_answer = self.answer_generator.generate(
                 question=question,
@@ -41,6 +44,7 @@ class AlchemyXSystem:
             )
             final_generation_seconds = perf_counter() - started
             log(f"Final generation: {final_generation_seconds:.2f}s")
+            _notify(progress, "Building source citations and run details.")
             citations = build_citations(agent_result["documents"])
             checker = getattr(self.agent, "sufficiency_checker", None)
             llm_client = getattr(checker, "llm_client", None)
@@ -116,3 +120,9 @@ def create_system():
 
 def ask(question):
     return create_system().ask(question)
+
+
+def _notify(progress, message):
+    if progress is None:
+        return
+    progress(message)

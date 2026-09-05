@@ -1,4 +1,5 @@
 from time import perf_counter
+from time import perf_counter
 from uuid import uuid4
 
 from ..config import MAX_AGENT_ITERATIONS
@@ -24,7 +25,7 @@ class AgentLoop:
         self.evidence_adjudicator = evidence_adjudicator
         self.entity_resolver = entity_resolver or EntityResolver()
 
-    def run(self, question, run_id=None):
+    def run(self, question, run_id=None, progress=None):
         original_question = question
         research_run_id = run_id or uuid4().hex[:6]
         token = set_run_id(research_run_id)
@@ -37,6 +38,7 @@ class AgentLoop:
         result = None
         adjudication_mode = False
         timeline = []
+        _notify(progress, "Extracting key entities from the question.")
         entity_started = perf_counter()
         entities = self.entity_resolver.extract(original_question)
         entity_extraction_seconds = perf_counter() - entity_started
@@ -47,10 +49,12 @@ class AgentLoop:
                 iteration_started = perf_counter()
                 log(f"ITERATION {iteration + 1}")
                 log(f"Query: {current_query}")
+                _notify(progress, f"Iteration {iteration + 1}: retrieving candidate evidence.")
                 retrieval_started = perf_counter()
                 retrieved = self._retrieve(current_query, adjudication_mode, entities)
                 if adjudication_mode:
                     log(f"Conflict-resolution search: {perf_counter() - retrieval_started:.2f}s")
+                _notify(progress, f"Iteration {iteration + 1}: retrieved {len(retrieved)} candidate chunks.")
                 query_stats = self._query_stats(retrieved)
                 new_documents = []
                 for document in retrieved:
@@ -69,8 +73,10 @@ class AgentLoop:
                     all_documents,
                     entity_matches,
                 )
+                _notify(progress, f"Iteration {iteration + 1}: checking evidence sufficiency.")
 
                 if not retrieved and not all_documents:
+                    _notify(progress, "No matching evidence was found in the archive.")
                     timeline.append(
                         self._retrieval_stop_timeline_entry(
                             iteration=iteration + 1,
@@ -99,6 +105,7 @@ class AgentLoop:
                 if iteration > 0 and not new_documents:
                     if result is not None and self._result_is_resolved(result):
                         result.sufficient = True
+                        _notify(progress, "Evidence is resolved; preparing the answer.")
                         return self._result(
                             all_documents,
                             result,
@@ -111,6 +118,7 @@ class AgentLoop:
                             entity_validation_seconds,
                         )
                     log("No new evidence found; stopping search.")
+                    _notify(progress, "No new evidence was found; stopping follow-up search.")
                     timeline.append(
                         self._retrieval_stop_timeline_entry(
                             iteration=iteration + 1,
@@ -161,6 +169,7 @@ class AgentLoop:
                     previous_queries | {current_query},
                 )
                 followup_seconds = perf_counter() - followup_started
+                _notify(progress, f"Iteration {iteration + 1}: checking for conflicting evidence.")
                 result = self._adjudicate_if_needed(original_question, usable_documents, result)
                 adjudication_seconds = getattr(self, "_last_adjudication_seconds", None)
                 log(f"Sufficient: {result.sufficient}")
@@ -185,29 +194,36 @@ class AgentLoop:
 
                 if result.sufficient:
                     timeline_entry["stop_reason"] = "sufficient_evidence"
+                    _notify(progress, "Sufficient evidence found; preparing the answer.")
                     return self._result(all_documents, result, iteration + 1, "sufficient_evidence", research_run_id, timeline, started, entity_extraction_seconds, entity_validation_seconds)
                 if not result.search_queries and not pending_queries:
                     timeline_entry["stop_reason"] = "no_search_query"
+                    _notify(progress, "No useful follow-up search was needed.")
                     return self._result(all_documents, result, iteration + 1, "no_search_query", research_run_id, timeline, started, entity_extraction_seconds, entity_validation_seconds)
 
                 timeline_entry["next_queries"] = list(result.search_queries)
+                _notify(progress, "Planning follow-up search: " + "; ".join(result.search_queries))
                 previous_queries.add(current_query)
                 pending_queries.extend(result.search_queries)
                 next_query = self._next_query(pending_queries, previous_queries)
                 if not next_query:
                     if result.search_queries:
                         timeline_entry["stop_reason"] = "repeated_query"
+                        _notify(progress, "Follow-up search repeated a previous query; stopping.")
                         return self._result(all_documents, result, iteration + 1, "repeated_query", research_run_id, timeline, started, entity_extraction_seconds, entity_validation_seconds)
                     timeline_entry["stop_reason"] = "no_search_query"
+                    _notify(progress, "No useful follow-up search was available.")
                     return self._result(all_documents, result, iteration + 1, "no_search_query", research_run_id, timeline, started, entity_extraction_seconds, entity_validation_seconds)
                 if next_query in previous_queries:
                     timeline_entry["stop_reason"] = "repeated_query"
+                    _notify(progress, "Follow-up search repeated a previous query; stopping.")
                     return self._result(all_documents, result, iteration + 1, "repeated_query", research_run_id, timeline, started, entity_extraction_seconds, entity_validation_seconds)
                 current_query = next_query
                 adjudication_mode = result.conflict_result is not None
 
             if timeline:
                 timeline[-1]["stop_reason"] = "max_iterations"
+            _notify(progress, "Maximum research iterations reached; preparing the answer.")
             return self._result(all_documents, result, self.MAX_ITERATIONS, "max_iterations", research_run_id, timeline, started, entity_extraction_seconds, entity_validation_seconds)
         finally:
             log(f"TOTAL: {perf_counter() - started:.2f}s")
@@ -501,3 +517,9 @@ def _entity_match_counts(entity_matches):
     for match in entity_matches.values():
         counts[match.entity_match] = counts.get(match.entity_match, 0) + 1
     return counts
+
+
+def _notify(progress, message):
+    if progress is None:
+        return
+    progress(message)

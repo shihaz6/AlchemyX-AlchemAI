@@ -14,8 +14,8 @@ def get_system():
     return create_system()
 
 
-def run_research(question: str) -> dict:
-    result = get_system().ask(question)
+def run_research(question: str, progress=None) -> dict:
+    result = get_system().ask(question, progress=progress)
     documents = result.get("documents", [])
     sufficiency_result = result.get("sufficiency_result")
     citations = result.get("citations", [])
@@ -67,11 +67,13 @@ class ConversationTurn:
     research_run_id: str
 
 
-def run_conversation_turn(question: str, history=None) -> dict:
+def run_conversation_turn(question: str, history=None, progress=None) -> dict:
     """Run one research turn, expanding obvious follow-ups with prior context."""
     clean_question = str(question or "").strip()
     effective_question = contextualize_question(clean_question, history or [])
-    result = run_research(effective_question)
+    if effective_question != clean_question:
+        _notify(progress, "Resolved the follow-up against the previous answer.")
+    result = run_research(effective_question, progress=progress)
     result["question"] = clean_question
     result["effective_question"] = effective_question
     result["used_conversation_context"] = effective_question != clean_question
@@ -638,3 +640,9 @@ def _user_safe_text(value):
     text = str(value or "")
     markers = ("usable sufficiency assessment", "invalid json", "malformed output")
     return "" if any(marker in text.lower() for marker in markers) else text
+
+
+def _notify(progress, message):
+    if progress is None:
+        return
+    progress(message)
