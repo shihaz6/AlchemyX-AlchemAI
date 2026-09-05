@@ -1,4 +1,4 @@
-# AlchemAI
+# AlchemyX - AlchemAI
 
 AlchemAI is a Streamlit research assistant for searching a local document corpus with hybrid retrieval (Chroma plus BM25), reranking evidence, checking sufficiency, resolving conflicts, and generating cited answers.
 
