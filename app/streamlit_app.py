@@ -51,6 +51,20 @@ def render_sources(sources):
         st.divider()
 
 
+def render_compact_citations(sources):
+    if not sources:
+        return
+
+    labels = []
+    for source in sources:
+        source_number = source.get("source_number")
+        if not source_number:
+            continue
+        labels.append(f"[{source_number}] {source.get('title', 'Unknown document')}")
+    if labels:
+        st.caption("Citations: " + " | ".join(labels))
+
+
 def render_context_sources(result):
     related_sources = result.get("related_sources", [])
     excluded_sources = result.get("excluded_sources", [])
@@ -68,6 +82,25 @@ def render_context_sources(result):
             for source in excluded_sources:
                 st.markdown(f"**{source.get('title', 'Unknown document')}**")
                 st.caption(f"Entity match: {source.get('entity_match', 'Excluded')}")
+
+
+def render_context_sources_inline(result):
+    related_sources = result.get("related_sources", [])
+    excluded_sources = result.get("excluded_sources", [])
+    if related_sources:
+        st.subheader("Related Sources")
+        for source in related_sources:
+            st.markdown(f"**{source.get('title', 'Unknown document')}**")
+            for support in source.get("supports", []):
+                st.caption(support)
+            if source.get("excerpt"):
+                st.caption(short_excerpt(source["excerpt"]))
+    if excluded_sources:
+        st.subheader("Excluded Evidence")
+        st.caption("These retrieved chunks were not used as direct evidence.")
+        for source in excluded_sources:
+            st.markdown(f"**{source.get('title', 'Unknown document')}**")
+            st.caption(f"Entity match: {source.get('entity_match', 'Excluded')}")
 
 
 def short_excerpt(text, limit=260):
@@ -129,6 +162,28 @@ def render_conflict_panel(conflict):
             st.write(conflict["selected_value"])
 
 
+def render_conflict_panel_inline(conflict):
+    conflict = conflict or {}
+    st.subheader("Why This Answer")
+    if not conflict.get("detected"):
+        st.write(
+            "The retrieved evidence directly addressed the question, "
+            "and no material conflicting claim was identified."
+        )
+        return
+
+    st.markdown("**Competing claims**")
+    for claim in conflict.get("competing_claims", []):
+        sources = ", ".join(claim.get("sources", [])) or "Retrieved evidence"
+        st.caption(f"{claim.get('value', 'Unknown')} - {sources}")
+    if conflict.get("resolution_summary"):
+        st.markdown("**Resolution**")
+        st.write(conflict["resolution_summary"])
+    if conflict.get("selected_value"):
+        st.markdown("**Selected answer**")
+        st.write(conflict["selected_value"])
+
+
 def render_performance(timings):
     with st.expander("Performance", expanded=False):
         if not timings:
@@ -151,6 +206,30 @@ def render_performance(timings):
                 st.caption(f"{label}: unavailable")
             else:
                 st.caption(f"{label}: {value:.2f}s")
+
+
+def render_performance_inline(timings):
+    st.subheader("Performance")
+    if not timings:
+        st.info("No timing data was returned.")
+        return
+    rows = [
+        ("Entity extraction", timings.get("entity_extraction")),
+        ("Entity validation", timings.get("entity_validation")),
+        ("Retrieval", timings.get("retrieval")),
+        ("Reranking", timings.get("reranking")),
+        ("Sufficiency", timings.get("sufficiency")),
+        ("Adjudication", timings.get("adjudication")),
+        ("Follow-up query generation", timings.get("followup_query_generation")),
+        ("Agent loop total", timings.get("agent_loop")),
+        ("Final generation", timings.get("final_generation")),
+        ("End-to-end total", timings.get("end_to_end")),
+    ]
+    for label, value in rows:
+        if value is None:
+            st.caption(f"{label}: unavailable")
+        else:
+            st.caption(f"{label}: {value:.2f}s")
 
 
 def render_technical_details(result):
@@ -185,6 +264,38 @@ def render_technical_details(result):
             )
 
 
+def render_technical_details_inline(result):
+    st.subheader("Technical Details")
+    st.caption(f"Research run: {result.get('research_run_id', '')}")
+    st.caption(f"Internal stop reason: {result.get('stop_reason', '')}")
+    st.caption(f"Chunks retrieved: {result.get('chunks_retrieved', 0)}")
+    if result.get("internal_errors"):
+        st.caption("Internal diagnostics")
+        st.json(result["internal_errors"])
+    if result.get("llm_calls"):
+        st.caption("LLM call counts")
+        st.json(result.get("llm_call_counts", {}))
+        st.caption("LLM calls")
+        st.json(result["llm_calls"])
+    technical_sources = result.get("technical_sources", [])
+    if technical_sources:
+        st.code(
+            json.dumps(
+                [
+                    {
+                        "id": source.get("id"),
+                        "source_doc": source.get("source_doc"),
+                        "chunk_index": source.get("chunk_index"),
+                        "score": source.get("score"),
+                    }
+                    for source in technical_sources
+                ],
+                indent=2,
+            ),
+            language="json",
+        )
+
+
 def render_result_metrics(result):
     conflict = result.get("conflict", {})
     timings = result.get("timings", {})
@@ -207,6 +318,16 @@ def render_research_details(result):
     render_technical_details(result)
 
 
+def render_research_details_inline(result):
+    render_result_metrics(result)
+    render_timeline(result.get("timeline", []))
+    render_conflict_panel_inline(result.get("conflict", {}))
+    render_sources(result.get("sources", []))
+    render_context_sources_inline(result)
+    render_performance_inline(result.get("timings", {}))
+    render_technical_details_inline(result)
+
+
 def render_conversation_history(turns):
     if not turns:
         return
@@ -216,20 +337,26 @@ def render_conversation_history(turns):
     latest_index = len(turns) - 1
     for index, turn in enumerate(turns):
         with st.container(border=True):
-            st.markdown(f"**Question {index + 1}**")
-            st.write(turn.get("question", ""))
+            question = turn.get("question", "")
+            answer = turn.get("clean_answer") or turn.get("answer", "No answer was returned.")
+            cols = st.columns([4, 2])
+            with cols[0]:
+                st.markdown(f"**Question {index + 1}**")
+                st.write(question)
+            with cols[1]:
+                st.caption(
+                    f"{turn.get('stop_reason_label', 'Unknown')} | "
+                    f"{format_seconds(turn.get('timings', {}).get('end_to_end'))}"
+                )
             if turn.get("used_conversation_context"):
                 st.caption("Follow-up resolved with previous turn context.")
             st.markdown("**Answer**")
-            st.write(turn.get("clean_answer") or turn.get("answer", "No answer was returned."))
-            if index != latest_index:
-                st.caption(
-                    f"Run {turn.get('research_run_id', '')} - "
-                    f"{turn.get('stop_reason_label', 'Unknown')}"
-                )
-
-    st.subheader("Latest Run Details")
-    render_research_details(turns[-1])
+            st.write(short_excerpt(answer, limit=420))
+            render_compact_citations(turn.get("sources", []))
+            with st.expander("Research details", expanded=index == latest_index):
+                st.markdown("**Full Answer**")
+                st.write(answer)
+                render_research_details_inline(turn)
 
 
 def render_research_page():
@@ -272,13 +399,23 @@ def render_research_page():
             try:
                 st.session_state["research_in_progress"] = True
                 st.session_state["pending_question"] = question.strip()
-                with st.spinner("Researching..."):
-                    st.markdown("**Question**")
-                    st.write(st.session_state["pending_question"])
+                with st.status("Researching...", expanded=True) as research_status:
+                    def update_research_status(message):
+                        research_status.write(message)
+
+                    update_research_status("Preparing the question for the research agent.")
                     result = run_conversation_turn(
                         question.strip(),
                         st.session_state["research_turns"],
+                        progress=update_research_status,
                     )
+                    research_status.update(
+                        label="Research complete.",
+                        state="complete",
+                        expanded=False,
+                    )
+                st.markdown("**Question**")
+                st.write(st.session_state["pending_question"])
                 st.session_state["research_result"] = result
                 st.session_state["research_question"] = question.strip()
                 st.session_state["research_turns"].append(result)
