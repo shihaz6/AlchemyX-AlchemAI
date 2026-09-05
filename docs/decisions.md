@@ -82,7 +82,7 @@ Chroma, BM25, and document-registry data are persisted under configured local pa
 
 **Rationale:** Iterative retrieval helps when first-pass evidence is incomplete, while a hard cap controls latency and provider cost.
 
-**Impact:** poorly phrased questions may stop before all useful evidence is found.
+**Impact:** Complex or poorly phrased questions may stop before all useful evidence is found.
 
 ### [MAJOR] Separate Evidence Selection From Final Generation
 
@@ -152,11 +152,19 @@ The Streamlit Research form invokes one backend research call when the user subm
 
 ### [MODERATE] Preserve Submitted Question Visibility During Research
 
-The Research form uses `clear_on_submit=False`, stores `pending_question`, and displays the submitted question above the spinner while research is running.
+The Research form stores `pending_question` and displays the submitted question after the research status block completes.
 
 **Rationale:** Long-running research should not make the user feel that the submitted question disappeared.
 
-**Impact:** The input remains visible during processing and is only cleared when starting a new research session.
+**Impact:** The submitted question remains visible with the generated turn, while the form input can be cleared after submit.
+
+### [MODERATE] Use One Live Research Status Component
+
+The Research page uses a single `st.status("Researching...")` block during question answering. The backend accepts an optional progress callback and reports major stages such as entity extraction, retrieval, sufficiency checking, conflict checking, follow-up planning, final answer generation, and citation building.
+
+**Rationale:** One live status component keeps loading feedback clear while showing what the agent is doing behind the scenes.
+
+**Impact:** The UI no longer shows both a spinner and a status block for the same request. Progress messages are best-effort UI feedback and do not change the research result contract.
 
 ### [MODERATE] Store Conversation History Only in Session State
 
@@ -272,11 +280,19 @@ Generated evidence IDs must belong to supplied documents, bracketed citations ar
 
 ### [MODERATE] Present Citations as Reader-Friendly Source Numbers
 
-The adapter maps raw evidence chunk IDs to numeric source references such as `[1]`, `[2]`, and `[3]`. The Streamlit answer view shows these numbers inline and renders a simple Sources section with source title, available formats, a short support label, and a short excerpt.
+The adapter maps raw evidence chunk IDs to numeric source references such as `[1]`, `[2]`, and `[3]`. The Streamlit answer view shows these numbers inline, renders a compact citation strip under each visible answer, and renders a simple Sources section with source title, available formats, a short support label, and a short excerpt.
 
 **Rationale:** Readers should be able to connect an answer claim to its source without reading raw chunk IDs, rerank scores, retrieval metadata, or internal file paths.
 
-**Impact:** Reader-facing citations are concise and stable within a single answer. Full chunk IDs, scores, source document paths, and retrieval diagnostics remain available in Technical Details for debugging and evaluation.
+**Impact:** Reader-facing citations are concise and stable within a single answer. Citation numbers remain understandable even when full details are collapsed. Full chunk IDs, scores, source document paths, and retrieval diagnostics remain available in Technical Details for debugging and evaluation.
+
+### [MODERATE] Show Each Research Turn as a Compact Expandable Card
+
+The Research page renders each completed question as a compact bordered turn with the question, stop reason, total time, and answer summary visible. Each turn has a `Research details` expander containing the full answer, metrics, research timeline, conflict explanation, sources, related and excluded evidence, performance timings, and technical details.
+
+**Rationale:** Multi-question sessions should preserve each turn's evidence trail without forcing every older run detail to stay open on the page.
+
+**Impact:** Older answers remain scannable, while their full provenance can still be opened. The newest turn is expanded by default; older turns are collapsed.
 
 ### [MODERATE] Keep Technical Citation Metadata Out of the Main Source View
 
