@@ -82,7 +82,7 @@ Chroma, BM25, and document-registry data are persisted under configured local pa
 
 **Rationale:** Iterative retrieval helps when first-pass evidence is incomplete, while a hard cap controls latency and provider cost.
 
-**Impact:** Complex or poorly phrased questions may stop before all useful evidence is found.
+**Impact:** poorly phrased questions may stop before all useful evidence is found.
 
 ### [MAJOR] Separate Evidence Selection From Final Generation
 
