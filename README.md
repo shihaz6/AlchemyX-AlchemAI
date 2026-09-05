@@ -1,12 +1,12 @@
-# AlchemyX - AlchemAI
+# AlchemAI
 
 AlchemAI is a Streamlit research assistant for searching a local document corpus with hybrid retrieval (Chroma plus BM25), reranking evidence, checking sufficiency, resolving conflicts, and generating cited answers.
 
-This guide starts from a Windows PC with no project libraries installed.
+This guide supports Windows and macOS machines with no project libraries installed.
 
 ## Requirements
 
-- Windows 10 or Windows 11
+- Windows 10/11 or macOS
 - Python 3.10 or newer (Python 3.11 or 3.12 recommended)
 - Internet access while installing packages and while using Voyage AI/OpenRouter
 - Voyage AI and OpenRouter API keys
@@ -21,20 +21,37 @@ Text PDFs do not normally require these OCR tools.
 
 ## Install Python
 
-Download Python from [python.org](https://www.python.org/downloads/) and enable **Add Python to PATH** during installation. Open a new Command Prompt and check it:
+On Windows, download Python from [python.org](https://www.python.org/downloads/) and enable **Add Python to PATH** during installation. Open a new Command Prompt and check it:
 
 ```bat
 python --version
 ```
 
+On macOS, install Python from [python.org](https://www.python.org/downloads/macos/) or Homebrew:
+
+```bash
+brew install python
+python3 --version
+```
+
 ## Install AlchemAI
 
-Open Command Prompt in the project folder:
+On Windows, open Command Prompt in the project folder:
 
 ```bat
 cd /d "C:\path\to\AlchemAI"
 python -m venv .venv
 .venv\Scripts\activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+On macOS, open Terminal in the project folder:
+
+```bash
+cd /path/to/AlchemAI
+python3 -m venv .venv
+source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
@@ -45,8 +62,16 @@ The virtual environment keeps AlchemAI's libraries separate from other Python pr
 
 Use `.env` in the project root for API keys and the corpus path. Create it from the safe template:
 
+Windows:
+
 ```bat
 copy .env.example .env
+```
+
+macOS:
+
+```bash
+cp .env.example .env
 ```
 
 Open `.env` in a text editor and set the required API keys:
@@ -54,13 +79,19 @@ Open `.env` in a text editor and set the required API keys:
 ```dotenv
 VOYAGE_API_KEY=your_voyage_key_here
 OPENROUTER_API_KEY=your_openrouter_key_here
-ALCHEMYX_CORPUS_PATH=Archive_test
+ALCHEMYX_CORPUS_PATH=Ashen_Era_Archive
 ```
 
 For a corpus outside the project, use an absolute Windows path, for example:
 
 ```dotenv
 ALCHEMYX_CORPUS_PATH=C:\data\my_archive
+```
+
+On macOS, use a normal absolute path, for example:
+
+```dotenv
+ALCHEMYX_CORPUS_PATH=/Users/your-name/data/my_archive
 ```
 
 Model choices and optional OCR tool paths are configured in `src\alchemyx\config.py`, not `.env`.
@@ -73,11 +104,20 @@ The ingestion pipeline supports `.txt`, `.md`, `.docx`, `.pdf`, and `.csv` files
 
 ## Build or Rebuild Indexes
 
-After adding or replacing documents, run:
+After adding or replacing documents, run the command for your platform.
+
+Windows:
 
 ```bat
 .venv\Scripts\activate
 python scripts\build_indexes.py
+```
+
+macOS:
+
+```bash
+source .venv/bin/activate
+python scripts/build_indexes.py
 ```
 
 This creates or updates the Chroma and BM25 indexes and the document registry. Re-run it after corpus changes. If a file fails ingestion, fix that file and run the command again.
@@ -86,17 +126,36 @@ This creates or updates the Chroma and BM25 indexes and the document registry. R
 
 From the project root, with the virtual environment active:
 
+Windows:
+
 ```bat
 .venv\Scripts\activate
 python -m streamlit run app\streamlit_app.py
+```
+
+macOS:
+
+```bash
+source .venv/bin/activate
+python -m streamlit run app/streamlit_app.py
 ```
 
 Open `http://localhost:8501` in a browser. Keep the terminal open while using the app. Press `Ctrl+C` in that terminal to stop it. Build the indexes first if the app reports that they are missing or empty.
 
 ## Run Tests and Checks
 
+Windows:
+
 ```bat
 .venv\Scripts\activate
+python -m pytest -q
+python -m compileall src app tests
+```
+
+macOS:
+
+```bash
+source .venv/bin/activate
 python -m pytest -q
 python -m compileall src app tests
 ```
@@ -117,6 +176,6 @@ python -m compileall src app tests
 
 **OpenRouter model unavailable:** choose a model available to your OpenRouter account by changing `OPENROUTER_MODEL` in `src\alchemyx\config.py`.
 
-**Scanned PDF extraction fails:** install Tesseract and Poppler. If Tesseract is not installed at its standard Windows location, set `TESSERACT_CMD` in `src\alchemyx\config.py`.
+**Scanned PDF extraction fails:** install Tesseract and Poppler. On macOS with Homebrew, use `brew install tesseract poppler`. If Tesseract is not installed at its standard Windows location, set `TESSERACT_CMD` in `src\alchemyx\config.py`.
 
 **No useful evidence:** confirm `ALCHEMYX_CORPUS_PATH` in `.env` points to the intended directory, then rebuild the indexes.
