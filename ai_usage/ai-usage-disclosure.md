@@ -24,7 +24,7 @@ Below, each team member's usage is described with specific examples from their l
 - Identified and fixed a bug in the chunking function where a small trailing text fragment could be left as its own low-content chunk; implemented a fix that merges undersized trailing chunks into the previous chunk instead.
 - Used ChatGPT to debug a performance issue where the system was re-embedding the entire document corpus on every query instead of embedding once at ingestion; identified and fixed this after ChatGPT asked a clarifying question about what was actually being re-embedded.
 - Validated the choice of cosine similarity over ChromaDB's default L2 distance metric by empirically testing both and comparing separation between relevant and irrelevant query results.
-- Used Codex sessions (exported logs included) for iterative development of hybrid search (BM25 + dense + RRF fusion) and reranking.
+
 
 Folder: `Shihaz's chatlogs/` (`codex sessions/`, `Shihaz-chatgpt.md`, `Shihaz-claude.md`)
 
