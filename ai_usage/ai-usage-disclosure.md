@@ -88,10 +88,9 @@ ai_usage/
 ├── Sakitha's chatlogs/
 │   └── Sakitha.md
 ├── Shihaz's chatlogs/
-│   ├── codex sessions/
-│   │   └── [Codex session export files]
 │   ├── Shihaz-chatgpt.md
 │   └── Shihaz-claude.md
 └── Sisindu's chatlogs/
-    └── Sisindu.md
+|   └── Sisindu.md
+└── Codex sessions /
 ```
