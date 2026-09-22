@@ -1,7 +1,6 @@
 streamlit>=1.37,<2
 python-dotenv
 pydantic
-pytest
 rank-bm25
 voyageai
 chromadb

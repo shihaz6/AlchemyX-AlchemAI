@@ -1,4 +1,5 @@
 import os
+import shutil
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -6,6 +7,8 @@ from dotenv import load_dotenv
 
 # Load one project-root configuration file for every application entry point.
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if PROJECT_ROOT.name == "src":
+    PROJECT_ROOT = PROJECT_ROOT.parent
 load_dotenv(PROJECT_ROOT / ".env")
 
 VOYAGE_API_KEY = os.getenv("VOYAGE_API_KEY", "")
@@ -30,6 +33,8 @@ DEFAULT_CHROMA_DIRECTORY = "data/chroma"
 DEFAULT_BM25_PATH = "data/bm25.json"
 DEFAULT_DOCUMENT_REGISTRY_PATH = "data/document_registry.json"
 DEFAULT_CORPUS_PATH = os.getenv("ALCHEMYX_CORPUS_PATH", "Ashen_Era_Archive")
-TESSERACT_CMD = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+TESSERACT_CMD = os.getenv("TESSERACT_CMD") or shutil.which("tesseract") or (
+    r"C:\Program Files\Tesseract-OCR\tesseract.exe" if os.name == "nt" else "tesseract"
+)
 VOYAGE_MAX_RETRIES = 3
 VOYAGE_RETRY_BASE_SECONDS = 1.0
