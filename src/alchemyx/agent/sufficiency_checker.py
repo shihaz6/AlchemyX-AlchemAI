@@ -1,4 +1,3 @@
-import json
 from time import perf_counter
 
 from .prompts import build_sufficiency_prompt
@@ -39,18 +38,6 @@ class SufficiencyChecker:
             return self.llm_client.ask(prompt, purpose=purpose)
         except TypeError:
             return self.llm_client.ask(prompt)
-
-    def _parse_response(self, response, documents):
-        from ..telemetry import log
-        data, retries, errors = parse_with_one_repair(
-            response,
-            "Return only valid JSON matching the sufficiency schema. No markdown or commentary.",
-            self.llm_client.ask,
-            log,
-            "sufficiency",
-        )
-        self.last_retry_count = retries
-        return self._parse_data(data, documents, errors)
 
     def _parse_data(self, data, documents, internal_errors=None):
         internal_errors = internal_errors or []
