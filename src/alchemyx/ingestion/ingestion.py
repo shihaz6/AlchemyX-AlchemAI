@@ -71,7 +71,7 @@ def read_pdf(file_path):
     except ImportError:
         import fitz as pymupdf
 
-    if os.name == "nt" and TESSERACT_CMD:
+    if TESSERACT_CMD:
         pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD
 
     text = ""

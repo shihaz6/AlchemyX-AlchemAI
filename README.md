@@ -94,7 +94,7 @@ On macOS, use a normal absolute path, for example:
 ALCHEMYX_CORPUS_PATH=/Users/your-name/data/my_archive
 ```
 
-Model choices and optional OCR tool paths are configured in `src\alchemyx\config.py`, not `.env`.
+Model choices are configured in `src/alchemyx/config.py`. Tesseract is discovered on PATH; set `TESSERACT_CMD` in `.env` to override its location on any platform.
 
 `.env` is ignored by Git. Never put real keys in Python files, the README, Streamlit code, or `API-KEY-VOYAGE-AI.txt`; that old text file is ignored and should not be used as configuration.
 
@@ -144,6 +144,11 @@ Open `http://localhost:8501` in a browser. Keep the terminal open while using th
 
 ## Run Tests and Checks
 
+Install development dependencies first: `python -m pip install -e ".[dev]"`.
+Tests run offline with mocked providers, need no API keys, and do not modify corpus indexes.
+
+
+
 Windows:
 
 ```bat
@@ -176,6 +181,6 @@ python -m compileall src app tests
 
 **OpenRouter model unavailable:** choose a model available to your OpenRouter account by changing `OPENROUTER_MODEL` in `src\alchemyx\config.py`.
 
-**Scanned PDF extraction fails:** install Tesseract and Poppler. On macOS with Homebrew, use `brew install tesseract poppler`. If Tesseract is not installed at its standard Windows location, set `TESSERACT_CMD` in `src\alchemyx\config.py`.
+**Scanned PDF extraction fails:** install Tesseract and Poppler. On macOS with Homebrew, use `brew install tesseract poppler`. If Tesseract is not on PATH or at its standard Windows location, set `TESSERACT_CMD` in `.env`.
 
 **No useful evidence:** confirm `ALCHEMYX_CORPUS_PATH` in `.env` points to the intended directory, then rebuild the indexes.

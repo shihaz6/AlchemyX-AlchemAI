@@ -1,5 +1,4 @@
 import os
-from dotenv import find_dotenv, load_dotenv
 try:
     from .bm25_store import BM25Store
     from .chunking import chunk_text
@@ -17,6 +16,7 @@ try:
         DEFAULT_DOCUMENT_REGISTRY_PATH,
         MIN_RERANK_SCORE,
         VOYAGE_API_KEY,
+        PROJECT_ROOT,
         RERANK_CANDIDATES,
         RETRIEVAL_TOP_K,
     )
@@ -37,12 +37,12 @@ except ImportError:
         DEFAULT_DOCUMENT_REGISTRY_PATH,
         MIN_RERANK_SCORE,
         VOYAGE_API_KEY,
+        PROJECT_ROOT,
         RERANK_CANDIDATES,
         RETRIEVAL_TOP_K,
     )
 
 def get_api_key(api_key=None):
-    load_dotenv(find_dotenv())
     api_key = api_key or os.getenv("VOYAGE_API_KEY") or VOYAGE_API_KEY
     if not api_key:
         raise RuntimeError("VOYAGE_API_KEY is missing. Add it to the .env file.")
@@ -52,8 +52,7 @@ def get_api_key(api_key=None):
 
 def create_retrieval_stack(api_key=None):
     api_key = get_api_key(api_key)
-    dotenv_path = find_dotenv()
-    project_root = os.path.dirname(dotenv_path) if dotenv_path else os.getcwd()
+    project_root = PROJECT_ROOT
     pipeline = RetrievalPipeline(
         api_key=api_key,
         persist_directory=os.path.join(project_root, DEFAULT_CHROMA_DIRECTORY),
@@ -71,7 +70,6 @@ def create_retrieval_stack(api_key=None):
 
 
 def create_agent_retrieval_pipeline(api_key=None):
-    load_dotenv(find_dotenv())
     pipeline, bm25_store, hybrid_search, reranker = create_retrieval_stack(api_key)
     if not bm25_store.documents:
         raise RuntimeError(

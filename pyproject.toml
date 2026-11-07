@@ -3,8 +3,20 @@ name = "alchemyx"
 version = "0.1.0"
 description = "Retrieval-augmented QA system for the Ashen Era corpus"
 requires-python = ">=3.10"
-dependencies = []
+dynamic = ["dependencies"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<9"]
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
