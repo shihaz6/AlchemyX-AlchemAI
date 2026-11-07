@@ -1,1 +1,0 @@
-"""Answer panel component."""

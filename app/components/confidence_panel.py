@@ -1,1 +1,0 @@
-"""Confidence panel component."""
